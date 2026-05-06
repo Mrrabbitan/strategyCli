@@ -64,6 +64,7 @@ Phase 3: 用户选择优化方式 → 启动对应 Agent / 交互式优化
 | 大V/博主投资策略 | 研究路径 → Phase 1 | 「按XX大V的思路写个策略」 |
 | 模糊的需求/意图 | 诊断路径 → Phase 1 | 「我想在A股做量化但不知道从哪开始」 |
 | 已有策略需优化 | 优化路径 → Phase 3 | 「优化 ~/策略研究/均线交叉/ 这个策略」 |
+| **A 股 ETF 相关需求** | 转交 cn-etf 子 skill → 见 [skills/cn-etf/SKILL.md](skills/cn-etf/SKILL.md) | 「ETF 轮动 / ETF 网格 / ETF 定投 / 行业 ETF / 沪深300ETF」 |
 
 **优化路径前置验证**：
 1. 检查用户指定的策略目录是否存在
@@ -312,6 +313,7 @@ def score_strategy(backtest_result: dict, design_doc: dict, market: str = "A股"
 | **futuapi** | 数据获取 + 模拟交易 | 港美股策略 |
 | **ftshare-all-in-one** | A股全品类数据获取 | A股策略首选 |
 | **securities-app-radar** | 竞品/行业动态扫描 | 策略背景分析 |
+| **cn-etf**（本 repo 内子 skill） | ETF 专用 prompts + 知识库 + 三模板 | 中国场内 ETF 策略（轮动/网格/定投） |
 
 ---
 

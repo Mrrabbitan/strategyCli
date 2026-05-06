@@ -1,0 +1,121 @@
+# === 回测参数 ===
+initial_cash: 1000000
+start_date: "2020-01-01"
+end_date: "2025-12-31"
+benchmark: "000906.SH"   # 中证800（行业策略综合基准）
+market: "A股"
+
+# === 交易成本（ETF 专用） ===
+commission: 0.0005       # 万 0.5（综合券商均价）
+stamp_tax: 0             # ETF 卖出免印花税（不可设非 0）
+slippage: 0.001          # 0.1%
+
+# === 标的池（8 只 = 1 宽基对照 + 6 行业 + 1 防守） ===
+symbols:
+  - code: "510300.SH"
+    name: "沪深300ETF"
+    market: "A股"
+    role: "wide_base"
+    lot_size: 100
+    commission: 0.0005
+    stamp_tax: 0
+    t_plus_1: true
+    price_limit_pct: 10
+
+  - code: "512170.SH"
+    name: "医疗ETF"
+    market: "A股"
+    role: "industry"
+    lot_size: 100
+    commission: 0.0005
+    stamp_tax: 0
+    t_plus_1: true
+    price_limit_pct: 10
+
+  - code: "512480.SH"
+    name: "半导体ETF"
+    market: "A股"
+    role: "industry"
+    lot_size: 100
+    commission: 0.0005
+    stamp_tax: 0
+    t_plus_1: true
+    price_limit_pct: 10
+
+  - code: "512760.SH"
+    name: "芯片ETF"
+    market: "A股"
+    role: "industry"
+    lot_size: 100
+    commission: 0.0005
+    stamp_tax: 0
+    t_plus_1: true
+    price_limit_pct: 10
+
+  - code: "512800.SH"
+    name: "银行ETF"
+    market: "A股"
+    role: "industry"
+    lot_size: 100
+    commission: 0.0005
+    stamp_tax: 0
+    t_plus_1: true
+    price_limit_pct: 10
+
+  - code: "512690.SH"
+    name: "酒ETF"
+    market: "A股"
+    role: "industry"
+    lot_size: 100
+    commission: 0.0005
+    stamp_tax: 0
+    t_plus_1: true
+    price_limit_pct: 10
+
+  - code: "515030.SH"
+    name: "新能源车ETF"
+    market: "A股"
+    role: "industry"
+    lot_size: 100
+    commission: 0.0005
+    stamp_tax: 0
+    t_plus_1: true
+    price_limit_pct: 10
+
+  - code: "510880.SH"
+    name: "红利ETF"
+    market: "A股"
+    role: "defensive"
+    lot_size: 100
+    commission: 0.0005
+    stamp_tax: 0
+    t_plus_1: true
+    price_limit_pct: 10
+
+# === 策略参数（轮动） ===
+indicators:
+  lookback_short: 20
+  lookback_mid: 60
+  lookback_long: 120
+  w_short: 0.5
+  w_mid: 0.3
+  w_long: 0.2
+  ma_period: 60
+  hold_top_n: 3
+  rebalance_freq: "monthly"      # monthly | weekly
+  rebalance_threshold: 5         # 仓位差异 < 5% 不动
+  position_scale: 0.95           # 留 5% 现金缓冲
+  defensive_code: "510880.SH"    # 防守切换标的
+
+# === 风控参数 ===
+risk:
+  max_position_pct: 35           # 单 ETF 仓位上限 %
+  total_position_pct: 95         # 总仓位上限 %
+  max_drawdown_pct: 18           # 最大回撤暂停 %
+  drawdown_pause_days: 5         # 回撤暂停天数
+  extreme_drop_pct: 7            # 极端单日跌幅 %
+  extreme_pause_days: 3          # 极端跌幅暂停天数
+
+# === 数据源 ===
+data_source: "akshare"           # ftshare > akshare（fetch_data.py 自动回落）
+data_cycle: "daily"
