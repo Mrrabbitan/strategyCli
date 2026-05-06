@@ -9,7 +9,7 @@
 调用方会提供以下信息：
 - `user_input`: 用户的原始策略需求描述（一句话或多句）
 - `market`: 目标市场（A股/港股/美股）。如未指定，通过分析 user_input 推断，仍不确定时默认 A股
-- `scripts_dir`: autostrategy scripts 目录的绝对路径（用于调用 env_setup.py 和 quality_check.py）
+- `scripts_dir`: strategycli scripts 目录的绝对路径（用于调用 env_setup.py 和 quality_check.py）
 - `workspace`: （可选）策略输出目录的绝对路径。如未提供，在 `~/策略研究/[策略名称]/` 下新建
 
 ---
@@ -42,8 +42,8 @@ DEFAULT_INITIAL_CASH = 1000000
 
 **与 huashu-nuwa 的边界**（避免误触发）：
 - 「蒸馏XX」「XX的思维方式」「做个XX视角」→ nuwa-skill（生成思维顾问）
-- 「按XX大V的思路做个策略」「帮我根据XX博主做投资策略」→ autostrategy（生成可回测的策略代码）
-- 如果用户先要思维顾问再做策略 → 先 nuwa 再 autostrategy
+- 「按XX大V的思路做个策略」「帮我根据XX博主做投资策略」→ strategycli（生成可回测的策略代码）
+- 如果用户先要思维顾问再做策略 → 先 nuwa 再 strategycli
 
 **诊断路径**（Step 1A）：
 ```

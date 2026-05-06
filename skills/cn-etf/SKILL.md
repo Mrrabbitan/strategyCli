@@ -5,7 +5,7 @@ description: |
   提供三个开箱即用模板：网格（grid_etf）、行业/宽基轮动（rotation_etf）、定投+网格（dca_grid_etf）。
   触发词：「ETF 策略」「ETF 量化」「ETF 轮动」「ETF 定投」「ETF 网格」「行业 ETF」「宽基 ETF」「沪深300 ETF」「红利 ETF」「指数基金量化」「大类资产轮动」。
   场景触发：「帮我做一个行业 ETF 轮动策略」「沪深300 ETF 网格交易」「ETF 定投加减仓」「半导体医药轮动」「红利 ETF 防守策略」。
-  本 skill 复用主 autostrategy 的 Phase 1/2/3 流程与回测器（scripts/run_backtest.py），仅替换 prompts 为 ETF 专用版。
+  本 skill 复用主 strategycli 的 Phase 1/2/3 流程与回测器（scripts/run_backtest.py），仅替换 prompts 为 ETF 专用版。
   适用市场：仅 A 股场内 ETF（含 QDII，但默认按 T+1 处理；不做高频套利、不做场外公募基金）。
 ---
 
@@ -18,14 +18,14 @@ description: |
 
 ## 1. 何时触发本 skill
 
-主 [autostrategy SKILL.md](../../SKILL.md) 在入口分流时，遇到以下场景应优先调用本子 skill：
+主 [strategycli SKILL.md](../../SKILL.md) 在入口分流时，遇到以下场景应优先调用本子 skill：
 
 | 用户输入特征 | 路径 |
 |-------------|------|
 | 明确说「ETF 策略 / ETF 轮动 / ETF 定投 / ETF 网格」 | 直接进入本 skill |
 | 标的明显是 ETF（如 510300 / 588000 / 159915 / 512760 等） | 直接进入本 skill |
 | 模糊说「指数基金量化」「大类资产轮动」「行业轮动」 | 默认进入本 skill 的 `rotation_etf` 模板 |
-| 用户要做 A 股个股策略（如 600519、000001）或港美股 | 走主 autostrategy 流程，不进入本 skill |
+| 用户要做 A 股个股策略（如 600519、000001）或港美股 | 走主 strategycli 流程，不进入本 skill |
 
 ---
 
@@ -42,7 +42,7 @@ description: |
 
 ---
 
-## 3. 与主 autostrategy 的契约
+## 3. 与主 strategycli 的契约
 
 本 skill **不重复实现**回测器、评分函数、质量检查脚本，全部复用主 repo：
 

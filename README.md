@@ -1,10 +1,10 @@
-# Autostrategy
+# strategycli
 
-> GitHub 仓库名：**[strategyCli](https://github.com/Mrrabbitan/strategyCli)**（维护者：Mrrabbitan）。本地目录名可为 `autostrategy` 或 `strategyCli`，二者指同一套代码。
+> GitHub 仓库名：**[strategyCli](https://github.com/Mrrabbitan/strategyCli)**（维护者：Mrrabbitan）。本地克隆目录可为 `strategycli` 或 `strategyCli`（与仓库名一致），二者指同一套代码。
 
 > AI 驱动的量化策略自动生成工具。输入策略需求 → Agent 设计 → 代码生成 → 回测验证 → 自主优化。
 
-[![Skill](https://img.shields.io/badge/Skill-strategyCli-blue)](https://github.com/Mrrabbitan/strategyCli)
+[![Skill](https://img.shields.io/badge/Skill-strategycli-blue)](https://github.com/Mrrabbitan/strategyCli)
 [![Market](https://img.shields.io/badge/Market-A%E8%82%A1%20%7C%20%E6%B8%AF%E8%82%A1%20%7C%20%E7%BE%8E%E8%82%A1-green)]()
 [![SubSkill](https://img.shields.io/badge/SubSkill-cn--etf-orange)](skills/cn-etf/SKILL.md)
 [![License](https://img.shields.io/badge/License-MIT-yellow)](LICENSE)
@@ -35,7 +35,7 @@
 
 ### Agent 化工作流
 
-Autostrategy 采用**多 Agent 串联**架构，用户只需在 3 个关键审批点参与决策：
+strategycli 采用**多 Agent 串联**架构，用户只需在 3 个关键审批点参与决策：
 
 ```
 用户输入
@@ -119,7 +119,7 @@ pip install numpy pandas pyyaml
 ## 项目结构
 
 ```
-autostrategy/
+strategycli/
 ├── SKILL.md                          # 调度台：入口分流 + Agent 编排 + 审批点控制
 ├── prompts/                          # 主 SKILL 的通用 Agent 指令
 │   ├── design_agent.md               # Phase 1：策略设计 Agent

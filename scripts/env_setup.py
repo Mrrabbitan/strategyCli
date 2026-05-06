@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Autostrategy 环境检测与一键安装脚本
+strategycli 环境检测与一键安装脚本
 
 用法:
     python3 env_setup.py                  # 检测当前环境
@@ -195,7 +195,7 @@ def install(market: str = None) -> dict:
 def print_report(env: dict):
     """打印环境检测报告"""
     print("=" * 50)
-    print("  Autostrategy 环境检测报告")
+    print("  strategycli 环境检测报告")
     print("=" * 50)
 
     # Python
@@ -238,7 +238,7 @@ def print_report(env: dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Autostrategy 环境检测与安装")
+    parser = argparse.ArgumentParser(description="strategycli 环境检测与安装")
     parser.add_argument("--market", choices=["A股", "港股", "美股"],
                         help="目标市场")
     parser.add_argument("--install", choices=["all"] + ["A股", "港股", "美股"],

@@ -8,7 +8,7 @@
 - `workspace`: 策略工作区目录的绝对路径
 - `market`: 目标市场（A股/港股/美股）
 - `baseline_score`: 基线评分（初始回测的 score_strategy() 分数）
-- `scripts_dir`: autostrategy scripts 目录的绝对路径（用于调用 run_backtest.py）
+- `scripts_dir`: strategycli scripts 目录的绝对路径（用于调用 run_backtest.py）
 
 ## 全局参数
 

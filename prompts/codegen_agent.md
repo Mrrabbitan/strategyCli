@@ -8,7 +8,7 @@
 
 调用方会提供以下信息：
 - `workspace`: 策略工作区目录的绝对路径（内含已确认的 STRATEGY_DESIGN.md）
-- `scripts_dir`: autostrategy scripts 目录的绝对路径（用于调用 run_backtest.py）
+- `scripts_dir`: strategycli scripts 目录的绝对路径（用于调用 run_backtest.py）
 
 ---
 

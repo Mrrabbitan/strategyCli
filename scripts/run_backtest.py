@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Autostrategy 回测执行脚本
+strategycli 回测执行脚本
 
 在策略目录中运行回测，输出结构化结果。
 期望目录结构:
@@ -775,7 +775,7 @@ def print_sensitivity_report(sensitivity_result: dict):
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Autostrategy 回测执行")
+    parser = argparse.ArgumentParser(description="strategycli 回测执行")
     parser.add_argument("strategy_dir", help="策略目录路径")
     parser.add_argument("--output", "-o", help="输出 JSON 文件路径")
     parser.add_argument("--split", type=float, default=None,

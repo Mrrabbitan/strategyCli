@@ -51,7 +51,7 @@ pip install -r requirements.txt
 # 2. 拉取真实数据（需联网；首次运行）
 python3 data/fetch_data.py --config config.yaml --output data/
 
-# 3. 运行回测（在 autostrategy 根目录下）
+# 3. 运行回测（在 strategycli 仓库根目录下）
 python3 scripts/run_backtest.py skills/cn-etf/examples/industry-rotation-etf
 
 # 4. 可选：训练/测试集分割

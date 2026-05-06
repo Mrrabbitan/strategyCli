@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Autostrategy 策略文档质量检查脚本
+strategycli 策略文档质量检查脚本
 
 检查 STRATEGY_DESIGN.md 是否满足可执行回测的最低质量标准。
 类比 nuwa-skill 的 quality_check.py。
