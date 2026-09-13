@@ -8,7 +8,7 @@ from unittest.mock import patch
 
 from research_modules import TZ, publish
 from research_store import atomic_json, research_path
-from research_views import render_module, evidence_chart, links, specific_evidence, candidate_card, intraday_context
+from research_views import render_module, evidence_chart, links, specific_evidence, candidate_card, intraday_context, prelaunch_evidence
 from investment_dashboard import render_dashboard
 
 
@@ -95,6 +95,37 @@ class ViewTests(unittest.TestCase):
         old=intraday_context({'source_asof':'2026-01-01T10:00:00+08:00','price':10,'notes':['触及冻结支撑']})
         self.assertIn('历史盘中背景',old);self.assertIn('触及冻结支撑',old)
         self.assertNotIn('data-context-until',old)
+
+    def test_prelaunch_scoring_and_original_frozen_structure_are_visible_without_chart(self):
+        row={'scores':{'板块持续性':20,'个股相对强度':10,'量价承接':10,'结构空间':20,'催化与业务证据':0},
+             'code':'600001','total_score':60,'frozen_id':'artificial','valid_until':'2026-09-14','levels':[{'label':'最近压力','value':12}]}
+        data={'frozen_records':[{'id':'artificial','code':'600001','valid_until':'2026-09-14','support':8,'upper':10,'frozen_at':'2026-09-07','method':'人工冻结结构'}]}
+        page=prelaunch_evidence(row,data)
+        self.assertIn('五维总分 / 100',page);self.assertIn('<dd>60</dd>',page)
+        self.assertIn('冻结支撑 / 元',page);self.assertIn('人工冻结结构',page);self.assertIn('2026-09-14',page)
+        self.assertIn('最近压力 / 元',page)
+
+    def test_prelaunch_unknown_scores_are_not_five_zeroes(self):
+        page=prelaunch_evidence({'scores':None},{})
+        self.assertIn('缺失项不记0分',page);self.assertNotIn('<dd>0</dd>',page)
+
+    def test_prelaunch_partial_scores_and_conflicting_deadline_are_not_confirmed(self):
+        from research_modules import eligible_now
+        row={'code':'600001','eligible':True,'scores':{'板块持续性':20},'total_score':100,'frozen_id':'artificial','valid_until':'2099-09-18'}
+        data={'frozen_records':[{'id':'artificial','code':'600001','valid_until':'2026-09-14'}]}
+        page=prelaunch_evidence(row,data)
+        self.assertIn('总分冲突',page);self.assertNotIn('<dd>100</dd>',page)
+        self.assertIn('期限缺失/冲突',page);self.assertIn('2026-09-14',page)
+        self.assertFalse(eligible_now('prelaunch',row,data))
+
+    def test_prelaunch_wrong_stock_or_duplicate_frozen_record_cannot_be_used(self):
+        from research_modules import eligible_now
+        row={'code':'600001','eligible':True,'frozen_id':'artificial','valid_until':'2099-09-18'}
+        wrong={'id':'artificial','code':'600002','valid_until':'2099-09-18','support':123.45}
+        for records in ([wrong],[dict(wrong,code='600001')]*2):
+            page=prelaunch_evidence(row,{'frozen_records':records})
+            self.assertNotIn('123.45',page);self.assertIn('冻结关联或期限',page)
+            self.assertFalse(eligible_now('prelaunch',row,{'frozen_records':records}))
 
     def test_markup_and_source_urls_are_sanitized(self):
         d=self.data();d['candidates'][0]['name']='<script>alert(1)</script>'

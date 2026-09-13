@@ -82,6 +82,11 @@ def eligible_now(module, row, data, now=None):
         # A re-run may have a newer module window, but cannot extend the original
         # frozen structure's five-session observation period.
         until = stamp(row.get('valid_until'))
+        if 'frozen_records' in data:
+            matches = [x for x in data.get('frozen_records') or [] if isinstance(x,dict) and row.get('frozen_id') and x.get('id')==row['frozen_id']]
+            if (len(matches)!=1 or not row.get('code') or matches[0].get('code')!=row['code']
+                    or stamp(matches[0].get('valid_until'))!=until):
+                return False
         return until is not None and now <= until
     if module == 'hot':
         auction = row.get('auction') or {}

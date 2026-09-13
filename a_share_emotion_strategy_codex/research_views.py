@@ -228,6 +228,26 @@ def intraday_context(context):
     return f'<aside class="notice"><b{attr}>{e(label)}</b><p>参考价 {e(context.get("price"))} 元 · 报价源时间 {e(context.get("source_asof"))}</p><ul>{lines(context.get("notes") or context.get("errors"))}</ul><p>{links(sources)}</p><p>原收盘资格、冻结结构与五日观察期限不顺延。</p></aside>'
 
 
+def prelaunch_evidence(row, data):
+    scores = row.get('scores') if isinstance(row.get('scores'),dict) else {}
+    dimensions = ('板块持续性','个股相对强度','量价承接','结构空间','催化与业务证据')
+    known = {k:v for k,v in scores.items() if k in dimensions and finite(v) and v in (0,10,20)}
+    score_complete = len(known)==5 and finite(row.get('total_score')) and row['total_score']==sum(known.values())
+    scored = '<dl class="candidate-metrics">'+''.join('<div><dt>'+e(k)+'</dt><dd>'+e(known.get(k))+'</dd></div>' for k in dimensions)+'</dl>'
+    matches = [x for x in data.get('frozen_records',[]) if isinstance(x,dict) and row.get('frozen_id') and x.get('id')==row['frozen_id']]
+    bound = len(matches)==1 and bool(row.get('code')) and matches[0].get('code')==row['code']
+    frozen = matches[0] if bound else {}
+    deadline_ok = bound and stamp(frozen.get('valid_until')) is not None and stamp(frozen.get('valid_until'))==stamp(row.get('valid_until'))
+    warning = '' if deadline_ok else '<p class="notice">冻结关联或期限缺失/冲突，须复核；不将行记录的较晚期限当成原观察期限。</p>'
+    fields = [('研究阶段',row.get('status')),('五维总分 / 100',row.get('total_score') if score_complete else None),('证据等级',row.get('evidence_grade')),
+              ('冻结日期',frozen.get('frozen_at')),('平台起日',frozen.get('platform_start')),('平台终日',frozen.get('platform_end')),
+              ('冻结支撑 / 元',frozen.get('support')),('冻结上沿 / 元',frozen.get('upper')),('冻结原观察截止',frozen.get('valid_until')),('行记录截止 / 待交叉核验',row.get('valid_until')),
+              ('冻结状态',frozen.get('state')),('结构证据口径',frozen.get('method'))]
+    fields.extend((x.get('label')+' / 元',x.get('value')) for x in row.get('levels',[]) if isinstance(x,dict) and x.get('label') in ('参考收盘','最近压力'))
+    structure = '<dl class="candidate-metrics">'+''.join('<div><dt>'+e(k)+'</dt><dd>'+e(v)+'</dd></div>' for k,v in fields)+'</dl>'
+    return '<h4>V3.4五维评分与冻结结构</h4>'+scored+('<p class="notice">评分证据不完整或总分冲突，缺失项不记0分；不能进入核心排名。</p>' if not score_complete else '<p>分数只用于本策略研究排序，不是胜率，不与其他策略共用。</p>')+warning+structure+'<p>'+e(row.get('confirmation'))+'</p>'
+
+
 def candidate_card(module, row, data, index, expired=False):
     code, name = str(row.get('code','')), row.get('name') or '待核验证券'
     identity = '|'.join((module, str(row.get('group')), str(row.get('sector') or row.get('theme') or ''), code or str(index)))
@@ -254,7 +274,7 @@ def candidate_card(module, row, data, index, expired=False):
     return f'''<article class="research-candidate" data-candidate data-search="{e(search)}" data-bucket="{bucket}"><header><div><span class="eyebrow">{e(group_label)}</span><h3>{e(name)} <small>{e(code)}</small></h3></div><span class="candidate-state{' positive' if eligible else ''}"{live_attr}>{e(label)}</span></header>
 <dl class="candidate-metrics">{metrics}</dl><p class="candidate-reason">{e((row.get('reasons') or ['需继续核验逐项条件'])[0])}</p>{intraday_context(row.get('intraday_context')) if module == 'prelaunch' else ''}
 <details id="candidate-{key}"><summary>证据与条件 <span>{pass_count}/{len(checks)} 项已通过</span></summary><div class="table-scroll"><table class="condition-table"><thead><tr><th>结论</th><th>条件</th><th>事实与缺口</th></tr></thead><tbody>{checklist or '<tr><td colspan="3">尚无逐项核验证据</td></tr>'}</tbody></table></div>
-{evidence_chart(row,data.get('as_of'))}{specific_evidence(module,row)}{yichujifa_evidence(row,data) if module == 'yichujifa' else ''}<ul>{lines(row.get('reasons'))}</ul>{('<p class="notice">失效 / 风险条件：'+e(row.get('invalidation') or row.get('risk_note'))+'</p>') if row.get('invalidation') or row.get('risk_note') else ''}<p class="source-links">{links(row.get('sources'))}</p></details></article>'''
+{evidence_chart(row,data.get('as_of'))}{specific_evidence(module,row)}{yichujifa_evidence(row,data) if module == 'yichujifa' else prelaunch_evidence(row,data) if module == 'prelaunch' else ''}<ul>{lines(row.get('reasons'))}</ul>{('<p class="notice">失效 / 风险条件：'+e(row.get('invalidation') or row.get('risk_note'))+'</p>') if row.get('invalidation') or row.get('risk_note') else ''}<p class="source-links">{links(row.get('sources'))}</p></details></article>'''
 
 
 def render_module(module):
