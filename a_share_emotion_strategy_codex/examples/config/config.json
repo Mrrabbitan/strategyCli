@@ -1,0 +1,53 @@
+{
+  "timezone": "Asia/Shanghai",
+  "market": "A股",
+  "strategy_target_mode": "dynamic",
+  "portfolio_rules": {
+    "total_capital_cny": 0,
+    "first_day_max_deployed_cny": [
+      0,
+      0
+    ],
+    "max_total_emotion_stock_exposure_cny": [
+      0,
+      0
+    ],
+    "min_cash_ratio": 0,
+    "max_cycle_loss_cny": 0,
+    "no_averaging_down": true,
+    "avoid_blind_high_open_chasing": true,
+    "high_open_avoid_threshold_pct": 7.0,
+    "preferred_entry_pattern": "分歧→承接→转强",
+    "market_veto": "若高位情绪股集体核按钮/跌停且低位接力同步炸板，第一小时暂停新开仓。",
+    "research_only": true,
+    "budget_confirmed": false
+  },
+  "daily_discovery": {
+    "new_opportunities": 5,
+    "preferences": [
+      "首板/2板",
+      "刚脱离底部",
+      "题材有板块效应",
+      "换手充分",
+      "无明显减持/业绩雷"
+    ],
+    "exclude_or_downweight": [
+      "高位连续加速",
+      "机构大额净卖出",
+      "重大减持未完成",
+      "业绩/监管风险",
+      "无板块效应的孤板"
+    ]
+  },
+  "verification": {
+    "min_source_types": 2,
+    "priority_sources": [
+      "交易所/公司公告",
+      "中证/上证/深证官方",
+      "中金所/CFFEX",
+      "主流财经媒体",
+      "行情数据平台"
+    ],
+    "rule": "关键价格、涨停梯队、龙虎榜、机构持仓/股指期货数据至少交叉核验两类来源；若口径冲突，报告差异并采用更权威/更接近官方的数据。"
+  }
+}

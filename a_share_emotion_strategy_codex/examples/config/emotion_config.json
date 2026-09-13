@@ -1,0 +1,208 @@
+{
+  "version": 3,
+  "daily_admission_limit": 5,
+  "max_auto_watchlist": 25,
+  "dynamic_target_limit": 5,
+  "retention_trading_days": 5,
+  "candidate_max_capital_cny": 0,
+  "max_new_positions": 2,
+  "max_new_total_capital_cny": 0,
+  "near_limit": {
+    "max_results": 5,
+    "max_distance_to_limit_pct": 3.0,
+    "minimum_universe_coverage_ratio": 0.98,
+    "quote_price_tolerance_pct": 0.3,
+    "listing_min_trading_days": 6,
+    "main_board_prefixes": [
+      "000",
+      "001",
+      "002",
+      "003",
+      "600",
+      "601",
+      "603",
+      "605"
+    ],
+    "score_weights": {
+      "proximity": 30,
+      "flow": 25,
+      "theme": 20,
+      "catalyst": 15,
+      "board_quality": 10
+    }
+  },
+  "leaders": {
+    "max_results": 5,
+    "min_current_boards": 2,
+    "min_recent_limit_count": 2,
+    "quote_price_tolerance_pct": 0.3,
+    "weights": {
+      "current_boards": 35,
+      "recent_frequency": 20,
+      "seal_quality": 20,
+      "liquidity": 15,
+      "theme_linkage": 10
+    }
+  },
+  "abnormal_10d": {
+    "warning_threshold_pct": 80.0,
+    "trigger_threshold_pct": 100.0,
+    "minimum_universe_coverage_ratio": 0.98,
+    "minimum_history_coverage_ratio": 0.98,
+    "quote_price_tolerance_pct": 0.3,
+    "gain_tolerance_pct_points": 0.8,
+    "history_workers": 32,
+    "history_cache_days": 15,
+    "forecast_horizon_trading_days": 5,
+    "continuation_weights": {
+      "trend_structure": 30,
+      "momentum_5d": 20,
+      "volume_confirmation": 20,
+      "close_location": 15,
+      "industry_linkage": 15
+    },
+    "pullback_risk_weights": {
+      "overextension": 30,
+      "volatility_upper_shadow": 25,
+      "volume_price_divergence": 20,
+      "weak_close": 15,
+      "announcement_risk": 10
+    }
+  },
+  "technology_leaders": {
+    "max_results": 10,
+    "max_per_direction": 2,
+    "min_current_boards": 2,
+    "min_recent_limit_count": 2,
+    "quote_price_tolerance_pct": 0.3,
+    "universe_score_threshold": 75,
+    "universe_min_boards": 3,
+    "universe_min_recent_limit_count": 4,
+    "universe_min_direction_limit_count": 2,
+    "code_prefixes": [
+      "000",
+      "001",
+      "002",
+      "003",
+      "300",
+      "301",
+      "600",
+      "601",
+      "603",
+      "605",
+      "688"
+    ],
+    "directions": {
+      "半导体芯片": [
+        "半导体",
+        "电子化学品",
+        "集成电路"
+      ],
+      "PCB与电子元件": [
+        "元件",
+        "印制电路",
+        "被动元件"
+      ],
+      "通信与算力基础设施": [
+        "通信设备",
+        "通信服务",
+        "数据中心",
+        "算力"
+      ],
+      "AI软件与计算机": [
+        "软件开发",
+        "IT服务",
+        "计算机设备",
+        "人工智能"
+      ],
+      "消费电子与光电": [
+        "消费电子",
+        "光学光电子",
+        "其他电子",
+        "照明设备"
+      ],
+      "机器人与智能制造": [
+        "自动化设备",
+        "机器人"
+      ]
+    },
+    "weights": {
+      "height": 25,
+      "repeatability": 20,
+      "seal_quality": 15,
+      "liquidity": 15,
+      "direction_linkage": 15,
+      "market_fit": 10
+    }
+  },
+  "candidate_filters": {
+    "min_boards": 1,
+    "max_boards": 2,
+    "min_turnover_pct": 2.0,
+    "max_turnover_pct": 18.0,
+    "min_amount_cny": 0,
+    "min_theme_limit_count": 2,
+    "min_seal_amount_ratio": 0.05,
+    "max_initial_breaks": 3,
+    "max_initial_active_sell_ratio": 0.75
+  },
+  "alerts": {
+    "high_open_hard_pct": 7.0,
+    "high_retreat_orange_pct": 5.0,
+    "high_retreat_red_pct": 8.0,
+    "below_vwap_pct": 2.0,
+    "active_sell_ratio": 0.65,
+    "break_increase_red": 2,
+    "seal_ratio_drop_red": 0.5,
+    "strong_pct": 3.0,
+    "strong_retreat_max_pct": 3.0,
+    "limit_up_pct": 9.5,
+    "limit_down_pct": -9.5
+  },
+  "catalyst": {
+    "max_age_calendar_days": 7,
+    "official_domains": [
+      "cninfo.com.cn",
+      "sse.com.cn",
+      "szse.cn",
+      "gov.cn"
+    ],
+    "rejected_domains": [
+      "guba.eastmoney.com",
+      "xueqiu.com",
+      "weibo.com",
+      "douyin.com",
+      "xiaohongshu.com"
+    ],
+    "hard_risk_words": [
+      "减持",
+      "立案",
+      "处罚",
+      "监管措施",
+      "风险提示",
+      "业绩预亏",
+      "重大亏损",
+      "退市",
+      "澄清",
+      "否认"
+    ]
+  },
+  "hot_sector_focus": {
+    "enabled": true,
+    "max_per_sector": 3,
+    "min_limit_up_count": 2,
+    "ranking_scope": "mainboard_limit_and_near_pool",
+    "video_source": "https://weixin.qq.com/sph/AwKv2oc22g",
+    "video_status": "user_summary_received_original_not_viewed",
+    "rule_source": "用户提供的视频六点摘要＋热点前三明确要求；量化权重为未回测的实现默认值，非作者原话",
+    "video_summary_received_on": "2026-09-08",
+    "strength_weights": {
+      "participation": 30,
+      "seal_quality": 20,
+      "resilience": 20,
+      "repeat_strength": 20,
+      "board_position": 10
+    },
+    "research_after_launch": true
+  }
+}

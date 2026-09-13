@@ -1,0 +1,58 @@
+# Runtime and historical material stays in the private local store.
+/inputs/
+/data/
+/reports/
+/site/
+/outputs/
+/archive/
+/archives/
+/assets/
+/dist/
+/build/
+
+# Legacy root-level JSON files are actual configuration/snapshots.
+# Safe JSON under examples/config and docs/playbooks remains versionable.
+/*.json
+
+# Private runtime exports, logs, credentials, and databases.
+*.jsonl
+*.log
+*.sqlite
+*.sqlite3
+*.sqlite-*
+*.sqlite3-*
+*.db
+*.db-*
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# Research images and copied document artifacts are not public source.
+*.png
+*.jpg
+*.jpeg
+*.webp
+*.gif
+*.tif
+*.tiff
+*.pdf
+*.xlsx
+*.docx
+*.pptx
+*.zip
+*.tar
+*.tar.gz
+
+# Python and editor output.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+.DS_Store
+.idea/
+.vscode/

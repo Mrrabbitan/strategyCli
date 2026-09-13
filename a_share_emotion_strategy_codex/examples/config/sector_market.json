@@ -1,0 +1,8 @@
+{
+  "etf_universe": [
+    {"code": "512800", "name": "银行ETF", "group": "bank"},
+    {"code": "159928", "name": "消费ETF", "group": "consumer"},
+    {"code": "512480", "name": "半导体ETF", "group": "semiconductor"},
+    {"code": "512170", "name": "医疗ETF", "group": "medical"}
+  ]
+}

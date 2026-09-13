@@ -1,0 +1,49 @@
+{
+  "stock": {
+    "long_term_min_score": 75.0,
+    "min_three_year_avg_roe_pct": 8.0,
+    "min_three_year_ocf_profit_ratio": 0.8,
+    "max_valuation_percentile": 0.8,
+    "weights": {
+      "profitability": 25.0,
+      "cash_flow": 20.0,
+      "balance_sheet": 15.0,
+      "shareholder_return": 10.0,
+      "valuation": 20.0,
+      "governance": 10.0
+    }
+  },
+  "etf": {
+    "long_term_min_score": 75.0,
+    "min_fund_size_cny": 0,
+    "min_average_turnover_cny": 0,
+    "max_tracking_error_pct": 1.0,
+    "max_total_fee_pct": 0.7,
+    "max_index_valuation_percentile": 0.8,
+    "weights": {
+      "diversification": 25.0,
+      "fees": 15.0,
+      "tracking": 20.0,
+      "liquidity_size": 20.0,
+      "index_valuation": 20.0
+    }
+  },
+  "t_watch": {
+    "min_amount_cny": 0,
+    "min_atr_pct": 1.5,
+    "max_atr_pct": 8.0,
+    "max_abs_move_pct": 9.5,
+    "quote_price_tolerance_pct": 0.3,
+    "support_atr_width": 0.25,
+    "pressure_atr_width": 0.25
+  },
+  "hard_risk_words": [
+    "立案",
+    "处罚",
+    "退市",
+    "重大减持",
+    "终止上市",
+    "欺诈发行",
+    "风险提示"
+  ]
+}
