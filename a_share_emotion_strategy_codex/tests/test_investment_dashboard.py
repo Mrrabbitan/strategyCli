@@ -17,9 +17,9 @@ class InvestmentDashboardTests(unittest.TestCase):
         self.env=patch.dict(os.environ,{'AUTOSTRATEGY_PRIVATE_ROOT':self.tmp.name});self.env.start();self.addCleanup(self.env.stop)
         self.y=patch('investment_dashboard.research_status',return_value={'as_of':None,'generated_at':None,'state':'测试空状态','missing':[],'link':None})
         self.y.start();self.addCleanup(self.y.stop)
-    def test_four_pages_and_independent_rules_without_accounts(self):
+    def test_six_pages_and_independent_rules_without_accounts(self):
         page=render_dashboard(dt.date(2026,9,11))
-        for name in ('hot','dragon','strategy','reports'):self.assertIn(f'id="page-{name}"',page)
+        for name in ('hot','dragon','yichujifa','prelaunch','strategy','reports'):self.assertIn(f'id="page-{name}"',page)
         for name in ('prelaunch','yichujifa','dragon'):self.assertIn(f'id="strategy-{name}"',page)
         for old in ('page-plans','page-etf','holdings-rows','portfolio_snapshot','account_total_cny'):
             # Removed hashes may exist as compatibility redirects, not pages or payload.

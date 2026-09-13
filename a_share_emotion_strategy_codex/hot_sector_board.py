@@ -45,7 +45,7 @@ def selection_evidence(row: dict, members: list[dict]) -> list[str]:
 def volume_audit(rows: list, boards: int, cutoff: str, close: float) -> dict:
     result = {'complete': False, 'ratio': None, 'expansion_count': None, 'days': [], 'error': ''}
     try:
-        if boards < 1 or len(rows) < boards + 2:
+        if boards < 1 or len(rows) < boards + 1:
             raise ValueError('缺少本轮首板及前一日量能')
         dates = [str(r[0]) for r in rows]
         if dates != sorted(set(dates)) or dates[-1] != cutoff:
@@ -81,7 +81,8 @@ def build_board(pool_payload: dict, quotes: dict, histories: dict, *, cutoff: st
     data = pool_payload.get('data') or {}
     pool = data.get('pool') or []
     if (str(data.get('qdate')) != cutoff.replace('-', '') or len(pool) != data.get('tc')
-            or not pool or len({r.get('c') for r in pool}) != len(pool)):
+            or not isinstance(data.get('pool'), list)
+            or len({r.get('c') for r in pool}) != len(pool)):
         raise ValueError('涨停池日期、总数或唯一代码校验失败')
     if not is_trading_day(day)[0] or not is_trading_day(next_day)[0] or previous_trading_day(next_day) != day:
         raise ValueError('观察日不是下一交易日')
@@ -120,7 +121,11 @@ def build_board(pool_payload: dict, quotes: dict, histories: dict, *, cutoff: st
                        actionable=False, auction_buy_eligible=False,
                        selection_reasons=selection_evidence(row, members),
                        announcement_items=ann.get('items', []), announcement_error=ann.get('error'),
-                       first_seal=raw.get('fbt'), last_seal=raw.get('lbt'))
+                       first_seal=raw.get('fbt'), last_seal=raw.get('lbt'),
+                       bars=[{'date': str(r[0]), 'open': float(r[1]), 'close': float(r[2]),
+                              'high': float(r[3]), 'low': float(r[4]),
+                              'volume_shares': float(r[5])*100, 'amount_cny': None}
+                             for r in histories.get(code, []) if len(r) >= 6 and str(r[0]) <= cutoff])
             group['items'].append(row)
         groups.append(group)
     return {'version': VERSION, 'rank_version': RANK_VERSION, 'policy_hash': policy_hash(config),
@@ -128,6 +133,7 @@ def build_board(pool_payload: dict, quotes: dict, histories: dict, *, cutoff: st
             'generated_at': dt.datetime.now(dt.timezone(dt.timedelta(hours=8))).isoformat(timespec='seconds'),
             'expires_at': next_session + 'T15:00:00+08:00', 'research_only': True,
             'auction_feed': 'not_connected', 'actionable': False, 'sectors': groups,
+            'status': 'complete' if groups else 'empty', 'hot_sector_focus': context,
             'ranking_method': context['methodology'],
             'sources': [{'label': '东方财富涨停池', 'url': 'https://quote.eastmoney.com/ztb/detail#type=ztgc'},
                         {'label': '腾讯收盘行情', 'url': 'https://qt.gtimg.cn/q=' + ','.join(('sh' if c.startswith('6') else 'sz')+c for g in groups for c in g['top_codes'])}]}
@@ -141,7 +147,7 @@ def load_board(path: Path | None = None) -> dict:
         if (data['version'] != VERSION or data['rank_version'] != RANK_VERSION
                 or data['policy_hash'] != policy_hash(config) or data['actionable'] is not False):
             raise ValueError('榜单版本或策略参数已变化')
-        if not data['cutoff'] < data['next_session'] or not 0 < len(data['sectors']) <= DISPLAY_SECTORS:
+        if not data['cutoff'] < data['next_session'] or not 0 <= len(data['sectors']) <= DISPLAY_SECTORS:
             raise ValueError('榜单日期或数量不符')
         dt.datetime.fromisoformat(data['expires_at'])
         seen = set()

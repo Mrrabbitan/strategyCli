@@ -81,6 +81,59 @@ class MembershipTests(unittest.TestCase):
             p.write_text('{bad')
             self.assertEqual(load_members(NOW, p)[1]['status'], 'invalid')
 
+    def test_failed_latest_attempt_does_not_reuse_automated_observations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'current.json'
+            path.write_text(json.dumps(document()))
+            original = path.read_bytes()
+            path.with_name('attempt.json').write_text(json.dumps({
+                'module_id': 'dragon', 'status': 'unavailable', 'attempted_at': NOW.isoformat()}))
+            members, quality = load_members(NOW, path)
+            self.assertEqual(members, {})
+            self.assertEqual(quality['status'], 'unavailable')
+            self.assertEqual(quality['observed_count'], 0)
+            self.assertIn('最新龙空龙研究失败', quality['reason'])
+            self.assertEqual(path.read_bytes(), original)
+
+    def test_failed_attempt_preserves_only_explicit_valid_pins(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'current.json'
+            data = document(pins=[
+                {'code': '002001', 'name': '虚构明确跟踪乙', 'confirmed': True, 'valid_until': '2026-09-15'},
+                {'code': '600001', 'name': '虚构观察甲', 'confirmed': True, 'valid_until': '2026-09-15'},
+                {'code': '002002', 'name': '未确认虚构丙', 'confirmed': False, 'valid_until': '2026-09-15'},
+                {'code': '002003', 'name': '过期虚构丁', 'confirmed': True, 'valid_until': '2026-09-13'}])
+            path.write_text(json.dumps(data))
+            path.with_name('attempt.json').write_text(json.dumps({'status': 'unavailable'}))
+            members, quality = load_members(NOW, path)
+            self.assertEqual(set(members), {'002001', '600001'})
+            self.assertTrue(all(row['origins'] == ['pin'] for row in members.values()))
+            self.assertEqual(quality['status'], 'partial')
+            self.assertEqual(quality['observed_count'], 0)
+            self.assertEqual(quality['pin_count'], 2)
+
+    def test_successful_research_after_failure_restores_current_observations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'current.json'
+            path.write_text(json.dumps(document()))
+            attempt = path.with_name('attempt.json')
+            attempt.write_text(json.dumps({'status': 'unavailable'}))
+            self.assertEqual(load_members(NOW, path)[0], {})
+            attempt.write_text(json.dumps({'status': 'partial'}))
+            members, quality = load_members(NOW, path)
+            self.assertEqual(set(members), {'600001'})
+            self.assertEqual(members['600001']['origins'], ['observed'])
+            self.assertEqual(quality['status'], 'valid')
+
+    def test_corrupt_attempt_is_not_silently_treated_as_success(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'current.json'
+            path.write_text(json.dumps(document()))
+            path.with_name('attempt.json').write_text('{bad')
+            members, quality = load_members(NOW, path)
+            self.assertFalse(members)
+            self.assertEqual(quality['status'], 'unavailable')
+
 
 class FeedTests(unittest.TestCase):
     def test_latest_cumulative_not_sum_and_source_time(self):

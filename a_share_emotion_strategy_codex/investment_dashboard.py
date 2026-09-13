@@ -44,29 +44,12 @@ def verified_reports(report_date, slots=None):
 
 
 def research_status(strategy):
-    now = dt.datetime.now(TZ).date().isoformat()
-    if strategy == 'prelaunch':
-        d = read_json(research_path('prelaunch/current.json'), {})
-        return {'as_of': d.get('cutoff'), 'generated_at': d.get('computed_at'),
-                'state': '历史观察，须重新核验' if d.get('window_end', '') < now else '观察，非买入确认',
-                'count': len(d.get('core', [])), 'missing': d.get('limitations', []), 'link': None}
-    if strategy == 'dragon':
-        d = read_json(research_path('dragon/current.json'), {})
-        return {'as_of': d.get('quote_date'), 'generated_at': d.get('analysis_date'),
-                'state': '观察窗口已过期' if d.get('target_date', '') < now else '等待竞价、回封与量能核验',
-                'count': None, 'missing': ['当前资格须由完整证据复核；资金净流出提醒独立展示，不自动改变排名。'], 'link': '#dragon-cycle-watchlist'}
-    pointer = read_json(Path.home() / 'Library/Application Support/Yichujifa/latest.json', {})
-    path = Path(str(pointer.get('report', '')))
-    allowed = Path.home() / 'Library/Application Support/Yichujifa/runs'
-    try:
-        path.resolve().relative_to(allowed.resolve())
-        d = read_json(path, {})
-    except ValueError:
-        d = {}
-    return {'as_of': d.get('as_of'), 'generated_at': d.get('generated_at'),
-            'state': '历史盘中复核，请按证据时点阅读' if d.get('mode') == 'live' else '收盘观察，盘中买点未确认',
-            'count': sum(x.get('prequalified') is True for x in d.get('candidates', []) if isinstance(x, dict)),
-            'missing': (d.get('errors', []) + [f"收盘预资格通过 {sum(x.get('prequalified') is True for x in d.get('candidates', []) if isinstance(x, dict))} 只；观察记录总数不是可建仓数量。", f"最近多板阶段 Day{(d.get('phase') or {}).get('day_number', '未知')}，仍需当日修复与新触发。", '历史涨停池、双源覆盖与公告需逐项核验；errors为空不等于证据完整。']), 'link': None}
+    from research_modules import load_module
+    current = load_module(strategy)
+    data = current['data']
+    return {'as_of': data.get('as_of'), 'generated_at': data.get('generated_at'),
+            'state': current['note'], 'count': None, 'missing': data.get('missing', []),
+            'link': '#page-' + strategy}
 
 
 def render_playbooks():
@@ -97,13 +80,13 @@ def render_playbooks():
 
 
 def render_dashboard(report_date=None, report=None, slots=None, alerts='', **_compat):
-    from hot_sector_board import load_board, render_board
-    from dragon_watchlist import render_dragon_watchlist_section
+    from research_views import render_module
     from fed_research import render_fed_research
     report_date = report_date or latest_report_date()
     data = {'reports': verified_reports(report_date, slots), 'report_date': str(report_date)}
     values = {
-        '@@HOT_SECTORS@@': render_board(load_board()), '@@DRAGON@@': render_dragon_watchlist_section(),
+        '@@HOT_SECTORS@@': render_module('hot'), '@@DRAGON@@': render_module('dragon'),
+        '@@YICHUJIFA@@': render_module('yichujifa'), '@@PRELAUNCH@@': render_module('prelaunch'),
         '@@FED_RESEARCH@@': render_fed_research(), '@@PLAYBOOKS@@': render_playbooks(),
         '@@DATA@@': json.dumps(data, ensure_ascii=False).replace('<', '\\u003c'),
         '@@CSS@@': (ROOT / 'templates/investment.css').read_text(),

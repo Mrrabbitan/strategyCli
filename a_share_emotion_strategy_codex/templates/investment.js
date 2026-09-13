@@ -8,7 +8,7 @@
   const money = v => typeof v === 'number' && Number.isFinite(v) ? `${signed(v/10000)}万元` : '数据不可用';
   let activePage = 'hot', reportIndex = 0, busy = false, version = null, timer;
   function switchPage(next) {
-    if (!['hot','dragon','strategy','reports'].includes(next)) next = 'reports';
+    if (!['hot','dragon','yichujifa','prelaunch','strategy','reports'].includes(next)) next = 'reports';
     activePage = next;
     document.querySelectorAll('.page').forEach(el => { el.hidden = el.id !== `page-${next}`; });
     document.querySelectorAll('[data-page]').forEach(el => {
@@ -75,10 +75,53 @@
     if (!response.ok) throw new Error('unavailable');return response.json();
   }
   function saveReading() {
-    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, reportIndex, date:$('#event-date').value, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
+    const filters = [...document.querySelectorAll('[data-research-search]')].map(el => ({module:el.dataset.researchSearch, search:el.value, filter:document.querySelector(`[data-research-filter="${el.dataset.researchSearch}"]`)?.value || 'all'}));
+    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, reportIndex, date:$('#event-date').value, filters, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
+  }
+  function filterResearch(module) {
+    const panel = document.querySelector(`[data-module="${module}"]`);if (!panel) return;
+    const query = panel.querySelector('[data-research-search]').value.trim().toLowerCase();
+    const bucket = panel.querySelector('[data-research-filter]').value;
+    let count = 0;
+    panel.querySelectorAll('[data-candidate]').forEach(el => {
+      el.hidden = !el.dataset.search.toLowerCase().includes(query) || (bucket !== 'all' && el.dataset.bucket !== bucket);
+      if (!el.hidden) count++;
+    });
+    panel.querySelectorAll('.research-group').forEach(el => {el.hidden = ![...el.querySelectorAll('[data-candidate]')].some(card => !card.hidden);});
+    panel.querySelector('[data-result-count]').textContent = `${count} 条匹配记录`;
+    panel.querySelector('.filter-empty').hidden = count > 0 || (!query && bucket === 'all');
+  }
+  document.querySelectorAll('[data-research-search]').forEach(el => el.addEventListener('input',()=>filterResearch(el.dataset.researchSearch)));
+  document.querySelectorAll('[data-research-filter]').forEach(el => el.addEventListener('change',()=>filterResearch(el.dataset.researchFilter)));
+  function expireResearch() {
+    const now = Date.now();
+    document.querySelectorAll('[data-context-until]').forEach(el => {
+      if (now > Date.parse(el.dataset.contextUntil)) { el.textContent = '历史盘中背景 · 需重新取得报价';el.removeAttribute('data-context-until'); }
+    });
+    document.querySelectorAll('[data-module]').forEach(panel => {
+      const until = Date.parse(panel.dataset.moduleUntil);
+      if (Number.isFinite(until) && now > until && !panel.dataset.expired) {
+        panel.dataset.expired = 'true';
+        panel.querySelector('.research-status b').textContent = '历史研究';
+        panel.querySelector('.module-validity').textContent = '观察窗口已结束；以下只作历史研究，须重新执行策略核验。';
+        panel.querySelector('.qualified-count').textContent = '0 条';
+        panel.querySelectorAll('.candidate-state').forEach(el=>{el.textContent='历史记录 · 不取得当前资格';el.classList.remove('positive');});
+        panel.querySelectorAll('[data-candidate]').forEach(el=>{el.dataset.bucket='other';});
+        filterResearch(panel.dataset.module);
+      }
+      panel.querySelectorAll('[data-live-until]').forEach(el=>{
+        if (Number.isFinite(Date.parse(el.dataset.liveUntil)) && now > Date.parse(el.dataset.liveUntil)) {
+          el.textContent=el.dataset.signalKind==='prelaunch'?'原观察期限已结束 · 需重新筛选':'历史盘中复核 · 当前需重新确认';el.classList.remove('positive');
+          el.removeAttribute('data-live-until');
+          const remaining = panel.querySelectorAll('.candidate-state.positive').length;
+          panel.querySelector('.qualified-count').textContent = `${remaining} 条`;
+        }
+      });
+    });
   }
   async function refresh() {
     if (busy || document.hidden) return;
+    expireResearch();
     busy = true;
     try {
       const [status, events] = await Promise.all([get('/api/monitor-status'),get(`/api/monitor-events?date=${encodeURIComponent($('#event-date').value || today())}`)]);
@@ -103,7 +146,17 @@
   try {
     const stored = JSON.parse(sessionStorage.getItem('investment-reading') || 'null');
     sessionStorage.removeItem('investment-reading');
-    if (stored) { switchPage(stored.page);showReport(stored.reportIndex);$('#event-date').value=stored.date;stored.open.forEach(id => { const el=document.getElementById(id);if(el?.tagName==='DETAILS')el.open=true; });requestAnimationFrame(()=>window.scrollTo(0,stored.scroll)); }
+    if (stored) {
+      switchPage(stored.page);showReport(stored.reportIndex);$('#event-date').value=stored.date;
+      const open = new Set(stored.open || []);
+      document.querySelectorAll('details[id]').forEach(el => { el.open = open.has(el.id); });
+      (stored.filters || []).forEach(f => {
+        if (!['hot','dragon','yichujifa','prelaunch'].includes(f.module)) return;
+        const search=document.querySelector(`[data-research-search="${f.module}"]`), filter=document.querySelector(`[data-research-filter="${f.module}"]`);
+        if(search)search.value=f.search;if(filter)filter.value=f.filter;filterResearch(f.module);
+      });
+      requestAnimationFrame(()=>window.scrollTo(0,stored.scroll));
+    }
   } catch { /* A stale reading preference never blocks the working surface. */ }
   schedule();
 })();

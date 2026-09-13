@@ -139,6 +139,24 @@ def load_members(now, path=None):
         return {}, dict(status='missing', reason='未找到龙空龙监控名单', errors=[])
     except (OSError, ValueError):
         return {}, dict(status='invalid', reason='龙空龙监控名单不可读', errors=[])
+    # A failed new research attempt must not silently keep an old automated pool
+    # active. Explicit, still-valid user pins remain independently authorized.
+    try:
+        attempt = json.loads(Path(path).with_name('attempt.json').read_text(encoding='utf-8'))
+    except FileNotFoundError:
+        attempt = {}
+    except (OSError, ValueError):
+        attempt = {'status': 'unavailable'}
+    failed = isinstance(attempt, dict) and attempt.get('status') == 'unavailable'
+    if failed and isinstance(document, dict):
+        document = dict(document)
+        monitoring = dict(document.get('monitoring') or {})
+        monitoring.update(valid_until='1900-01-01', observed=[])
+        document['monitoring'] = monitoring
+        members, quality = monitoring_members(document, now.astimezone(TZ).date())
+        quality['reason'] = '最新龙空龙研究失败，暂停自动观察名单；仅保留有效的用户明确持续跟踪项'
+        quality['status'] = 'partial' if members else 'unavailable'
+        return members, quality
     return monitoring_members(document, now.astimezone(TZ).date())
 
 
