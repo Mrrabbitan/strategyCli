@@ -2,6 +2,7 @@
 import copy
 import datetime as dt
 import os
+import re
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -126,6 +127,122 @@ class TopicTests(unittest.TestCase):
         self.assertIn('历史研究', page)
         self.assertIn('核心资格分别核验', page)
         self.assertEqual(render_topic_links('dragon', now=self.now), '')
+
+    def tiered_comparison(self):
+        data = self.comparison()
+        for number in range(2, 6):
+            stock = copy.deepcopy(data['stocks'][0])
+            stock.update(code=f'60000{number}', name=f'人工样本{number}',
+                         rank=number if number <= 3 else None)
+            data['stocks'].append(stock)
+        data['context_notes'] = ['人工集中度说明，不修改配置']
+        data['related_modules'] = ['hot', 'dragon', 'yichujifa', 'prelaunch']
+
+        def item(number, rank, position='unknown'):
+            return {'code': f'60000{number}', 'rank': rank, 'action': '人工处理方向',
+                    'reason': '人工比较理由', 'conditions': '人工待验证条件',
+                    'position_status': position}
+
+        data['decision_tiers'] = [
+            {'id': 'exit', 'label': '退出与排除', 'summary': '人工退出说明',
+             'items': [item(3, 2, 'held'), item(4, 1, 'not_held')]},
+            {'id': 'observe', 'label': '观察', 'summary': '人工观察说明', 'items': [item(2, 1)]},
+            {'id': 'conditional', 'label': '明日条件操作', 'summary': '人工条件说明',
+             'items': [item(1, 5), item(5, 1)]},
+        ]
+        return data
+
+    def test_tiers_sort_independently_without_changing_original_ranks(self):
+        data = self.tiered_comparison()
+        publish_topic(data, now=self.now)
+        page = render_topics(now=self.now)
+        self.assertLess(page.index('data-tier-id="conditional"'), page.index('data-tier-id="observe"'))
+        self.assertLess(page.index('data-tier-id="observe"'), page.index('data-tier-id="exit"'))
+        conditional = page.split('data-tier-id="conditional"', 1)[1].split('data-tier-id="observe"', 1)[0]
+        self.assertLess(conditional.index('600005'), conditional.index('600001'))
+        self.assertIn('原第1位', conditional)
+        self.assertIn('<td>5</td>', conditional)
+        self.assertEqual(data['stocks'][0]['rank'], 1)
+        for text in ('持仓退出管理', '移出候选池（未持仓）', '明日盘中确认尚未发生',
+                     '条件未满足时不能称为可买', '不授予交易资格', '不覆盖热点原始前三名次'):
+            self.assertIn(text, page)
+
+    def test_decision_stocks_cannot_be_unresolved_or_repeat_across_tiers(self):
+        for code in ('999999', '600002'):
+            with self.subTest(code=code):
+                data = self.tiered_comparison()
+                data['decision_tiers'][0]['items'][0]['code'] = code
+                with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+        data = self.tiered_comparison()
+        data['decision_tiers'][2]['items'][1]['code'] = '600001'
+        with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+
+    def test_decision_priorities_are_positive_unique_integers(self):
+        for rank in (True, 0, -1, '1', 1.5, 5):
+            with self.subTest(rank=rank):
+                data = self.tiered_comparison()
+                data['decision_tiers'][2]['items'][1]['rank'] = rank
+                with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+
+    def test_three_distinct_tiers_allow_empty_without_replacement(self):
+        data = self.tiered_comparison()
+        for tier in data['decision_tiers']:
+            tier['items'] = []
+        publish_topic(data, now=self.now)
+        self.assertEqual(render_topics(now=self.now).count('本梯队暂空，不补位。'), 3)
+        for tiers in (data['decision_tiers'][:2], data['decision_tiers'] + [data['decision_tiers'][0]],
+                      [data['decision_tiers'][0]] * 3):
+            invalid = copy.deepcopy(data); invalid['decision_tiers'] = tiers
+            with self.assertRaises(ValueError): publish_topic(invalid, now=self.now)
+
+    def test_exit_must_distinguish_holdings_from_candidate_removal(self):
+        for position in ('unknown', 'assumed', None):
+            data = self.tiered_comparison()
+            data['decision_tiers'][0]['items'][0]['position_status'] = position
+            with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+        data = self.tiered_comparison()
+        del data['decision_tiers'][0]['items'][0]['position_status']
+        with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+
+    def test_decision_notes_are_escaped_and_cannot_grant_eligibility(self):
+        data = self.tiered_comparison()
+        attack = '<img src=x onerror=alert(1)>'
+        data['context_notes'] = [attack]
+        tier = data['decision_tiers'][2]
+        tier.update(label=attack, summary=attack)
+        tier['items'][0].update(action=attack, reason=attack, conditions=attack)
+        publish_topic(data, now=self.now)
+        page = render_topics(now=self.now)
+        self.assertNotIn(attack, page)
+        self.assertIn('&lt;img src=x onerror=alert(1)&gt;', page)
+        tier['items'][0]['eligible'] = True
+        with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+        for context in ('plain text', [1], [None]):
+            invalid = self.tiered_comparison(); invalid['context_notes'] = context
+            with self.assertRaises(ValueError): publish_topic(invalid, now=self.now)
+
+    def test_all_four_research_entries_link_topic_without_adding_pages(self):
+        from investment_dashboard import render_dashboard
+        from research_topics import render_topic_links
+        data = self.tiered_comparison()
+        data['related_module'] = 'prelaunch'
+        publish_topic(data, now=self.now)
+        page = render_dashboard(self.now.date())
+        self.assertEqual(re.findall(r'data-page="([a-z]+)"', page),
+                         ['hot', 'dragon', 'yichujifa', 'prelaunch', 'strategy', 'reports'])
+        self.assertNotIn('@@', page)
+        for module in data['related_modules']:
+            surface = page.split(f'<section id="page-{module}"', 1)[1].split('<section id="page-', 1)[0]
+            self.assertIn('href="#topic-sample"', surface)
+            self.assertEqual(render_topic_links(module, now=self.now).count('href="#topic-sample"'), 1)
+        later = render_topics(now=self.now + dt.timedelta(days=1))
+        self.assertIn('观察窗口已结束', later)
+        self.assertIn(data['valid_until'], later)
+
+    def test_invalid_related_modules_do_not_silently_expand_scope(self):
+        for related in ('hot', ['hot', 'hot'], ['strategy'], [None]):
+            data = self.comparison(); data['related_modules'] = related
+            with self.assertRaises(ValueError): publish_topic(data, now=self.now)
 
 
 if __name__ == '__main__': unittest.main()
