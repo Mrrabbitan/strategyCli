@@ -114,6 +114,36 @@ class RefreshResearchTests(unittest.TestCase):
         value = artificial('yichujifa'); value['schema_version'] = 999
         with self.assertRaises(ValueError): refresh.run_module('yichujifa', NOW, 'prepare', input_data=value)
 
+    def test_cli_imports_native_frame_array_without_resampling(self):
+        payloads = {'report': {'schema_version': 1}, 'evidence': {'as_of': '2026-09-11'},
+                    'live-review': {'mode': 'live', 'status': '数据不足'},
+                    'snapshots': [{'time': '2026-09-14T09:' + minute + ':00+08:00',
+                                   'quotes': {}} for minute in ('55', '56', '57')]}
+        paths = {}
+        for name, value in payloads.items():
+            paths[name] = Path(self.tmp.name) / (name + '.json')
+            paths[name].write_text(json.dumps(value))
+        argv = ['refresh_research.py', '--module', 'yichujifa', '--phase', 'intraday',
+                '--input', str(paths['report']), '--evidence', str(paths['evidence']),
+                '--live-review', str(paths['live-review']), '--snapshots', str(paths['snapshots'])]
+        with patch('sys.argv', argv), patch.object(refresh, 'refresh', return_value={'modules': []}) as run, patch('builtins.print'):
+            self.assertEqual(refresh.main(), 0)
+        supplied = run.call_args.kwargs['input_data']
+        self.assertEqual(supplied['snapshots'], payloads['snapshots'])
+        self.assertEqual(supplied['live'], payloads['live-review'])
+        self.assertEqual(supplied['report'], payloads['report'])
+        self.assertEqual(supplied['evidence'], payloads['evidence'])
+
+    def test_frame_input_keeps_other_shapes_and_paths_restricted(self):
+        file = Path(self.tmp.name) / 'frames.json'; file.write_text('[{"quotes": {}}]')
+        self.assertEqual(refresh._read_input(file, frames=True), [{'quotes': {}}])
+        with self.assertRaises(ValueError): refresh._read_input(file)
+        file.write_text('{}')
+        with self.assertRaises(ValueError): refresh._read_input(file, frames=True)
+        with tempfile.TemporaryDirectory() as other:
+            outside = Path(other) / 'frames.json'; outside.write_text('[]')
+            with self.assertRaises(ValueError): refresh._read_input(outside, frames=True)
+
     def test_refresh_records_run_start_for_equal_source_late_results(self):
         with patch.object(refresh, 'run_module', side_effect=lambda module, *a, **kw: artificial(module)):
             refresh.refresh(['yichujifa'], as_of=NOW, rebuild=False)

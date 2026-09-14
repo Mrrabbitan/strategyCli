@@ -22,7 +22,7 @@ def choose_phase(now):
     return 'prepare' if now.time().replace(tzinfo=None) < dt.time(9, 30) else 'intraday'
 
 
-def _read_input(path):
+def _read_input(path, *, frames=False):
     allowed = (private_path().resolve(), (Path.home() / 'Library/Application Support/Yichujifa').resolve())
     resolved = path.resolve()
     if not any(resolved == root or root in resolved.parents for root in allowed):
@@ -30,8 +30,10 @@ def _read_input(path):
     if path.is_symlink() or path.suffix != '.json' or path.stat().st_size > 100_000_000:
         raise ValueError('Input must be a regular bounded JSON research file')
     data = json.loads(path.read_text(encoding='utf-8'))
-    if not isinstance(data, dict):
-        raise ValueError('Input must be a research object')
+    # The native live sampler writes a JSON array; reports and reviews remain
+    # objects. Frame timestamps and eligibility are checked by the adapter.
+    if not isinstance(data, list if frames else dict):
+        raise ValueError('Input must be a frame array' if frames else 'Input must be a research object')
     return data
 
 
@@ -166,7 +168,7 @@ def main():
             parser.error('Native live/evidence files require --module yichujifa and --input')
         input_data = {'report':input_data, 'evidence':_read_input(args.evidence) if args.evidence else None,
                       'live':_read_input(args.live_review) if args.live_review else None,
-                      'snapshots':_read_input(args.snapshots) if args.snapshots else None}
+                      'snapshots':_read_input(args.snapshots, frames=True) if args.snapshots else None}
     if args.enrichment:
         if args.module != 'prelaunch' or input_data is None:
             parser.error('Bound enrichment requires --module prelaunch and --input')
