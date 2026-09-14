@@ -58,6 +58,7 @@ python3 refresh_research.py --module yichujifa --input "$AUTOSTRATEGY_PRIVATE_RO
 - 龙空龙快照通过 `research_path('dragon/current.json')` 读取。
 - 一触即发、潜伏快照分别在 `research_path('yichujifa/current.json')`、`research_path('prelaunch/current.json')`。
 - 每条研究分别保留分析时间、行情截止、适用窗口、来源、缺失项及规则版本。
+- 独立产业专题通过 `research_topics.publish_topic()` 写入私有 `research/topics/<主题>/current.json`，在时点报告中展示，保留来源发布日、观察期、取得时间和原观察期限；过期只作历史，不进入策略候选池。更换生成时间不产生新证据版本，坏专题不阻断其他页面。
 - 专题保存为有日期的独立记录，放在时点报告中，不自动加入任何交易观察池。
 - 没有实质变化时不制造新版本；仅刷新页面或重写生成时间不算研究更新。
 

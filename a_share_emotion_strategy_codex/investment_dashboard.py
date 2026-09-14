@@ -82,12 +82,14 @@ def render_playbooks():
 def render_dashboard(report_date=None, report=None, slots=None, alerts='', **_compat):
     from research_views import render_module
     from fed_research import render_fed_research
+    from research_topics import render_topics
     report_date = report_date or latest_report_date()
     data = {'reports': verified_reports(report_date, slots), 'report_date': str(report_date)}
     values = {
         '@@HOT_SECTORS@@': render_module('hot'), '@@DRAGON@@': render_module('dragon'),
         '@@YICHUJIFA@@': render_module('yichujifa'), '@@PRELAUNCH@@': render_module('prelaunch'),
         '@@FED_RESEARCH@@': render_fed_research(), '@@PLAYBOOKS@@': render_playbooks(),
+        '@@RESEARCH_TOPICS@@': render_topics(),
         '@@DATA@@': json.dumps(data, ensure_ascii=False).replace('<', '\\u003c'),
         '@@CSS@@': (ROOT / 'templates/investment.css').read_text(),
         '@@JS@@': (ROOT / 'templates/investment.js').read_text(),
