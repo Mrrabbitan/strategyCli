@@ -78,5 +78,54 @@ class TopicTests(unittest.TestCase):
         self.assertIn('独立专题资料不可用', page)
         self.assertIn('人工专题', page)
 
+    def comparison(self):
+        from research_topics import STOCK_TEXT
+        data = copy.deepcopy(self.data)
+        data.update(comparison_scope='人工局部比较池', comparison_method='人工观察顺序，不授予资格')
+        stock = {key: '人工说明' for key in STOCK_TEXT}
+        stock.update(code='600001', name='人工样本', rank=1, close=10.0,
+                     price_as_of=data['as_of'], sources=[
+                         {'label': '人工来源', 'url': 'https://example.org/history',
+                          'published_at': '2026-01-08', 'observation_period': '人工周期',
+                          'retrieved_at': self.now.isoformat()}])
+        data['stocks'] = [stock]
+        return data
+
+    def test_stock_comparison_preserves_scope_dates_and_counter_evidence(self):
+        data = self.comparison()
+        data['stocks'][0]['counter'] = '<img src=x onerror=alert(1)>'
+        publish_topic(data, now=self.now)
+        page = render_topics(now=self.now + dt.timedelta(days=1))
+        for text in ('人工局部比较池', '人工观察顺序', '最强反证', '下一步确认', '失效条件', '观察窗口已结束'):
+            self.assertIn(text, page)
+        self.assertNotIn('<img src=x', page)
+        self.assertIn('id="topic-sample-600001"', page)
+
+    def test_duplicate_stock_and_rank_cannot_inflate_comparison(self):
+        data = self.comparison()
+        data['stocks'].append(copy.deepcopy(data['stocks'][0]))
+        with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+        data['stocks'][1]['code'] = '600002'
+        with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+        data['stocks'][1]['rank'] = 4
+        with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+
+    def test_prices_cannot_cross_cutoff_or_grant_eligibility(self):
+        for update in ({'price_as_of': '2026-01-09T15:00:00+08:00'}, {'close': float('nan')},
+                       {'eligible': True}, {'sources': []}):
+            with self.subTest(update=update):
+                data = self.comparison(); data['stocks'][0].update(update)
+                with self.assertRaises(ValueError): publish_topic(data, now=self.now)
+
+    def test_related_link_keeps_expiry_and_strategy_independence(self):
+        from research_topics import render_topic_links
+        data = self.comparison(); data['related_module'] = 'prelaunch'
+        publish_topic(data, now=self.now)
+        page = render_topic_links('prelaunch', now=self.now + dt.timedelta(days=1))
+        self.assertIn('href="#topic-sample"', page)
+        self.assertIn('历史研究', page)
+        self.assertIn('核心资格分别核验', page)
+        self.assertEqual(render_topic_links('dragon', now=self.now), '')
+
 
 if __name__ == '__main__': unittest.main()
