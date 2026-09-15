@@ -57,6 +57,39 @@ def run(data=None, review=True, **kwargs):
     return p.research(NOW, input_data=data, enrichment=extra, **kwargs)
 
 
+def next_day(data, close, volume=800.):
+    """Advance a complete artificial daily bundle without changing old bars."""
+    data = copy.deepcopy(data)
+    day = p._sessions(dt.date.fromisoformat(data['signal_date']), 1)[0]
+    data['signal_date'] = day
+    for stock in data['stocks']:
+        stock['cap_date'] = day
+        stock['security']['as_of'] = day
+        stock['bars'].append(dict(stock['bars'][-1], date=day, open=close,
+                                  high=close+.02, low=close-.02, close=close,
+                                  volume_shares=volume, amount_cny=close*volume,
+                                  limit_up=False, limit_verified=True))
+    benchmark = data['benchmark']['bars']
+    bench_close = benchmark[-1]['close']-.1
+    benchmark.append(dict(benchmark[-1], date=day, open=bench_close, high=bench_close+.1,
+                          low=bench_close-.1, close=bench_close))
+    data['market']['as_of'] = day
+    for industry in data['industries'].values():
+        industry['as_of'] = day
+    return data
+
+
+def run_day(data, previous):
+    day = data['signal_date']
+    extra = enrichment(data)
+    extra['signal_date'] = day
+    for stock in extra['stocks'].values():
+        for evidence in stock.values():
+            evidence['as_of'] = day
+    now = dt.datetime.combine(dt.date.fromisoformat(day), dt.time(16), p.TZ)
+    return p.research(now, input_data=data, enrichment=extra, previous=previous)
+
+
 class PrelaunchResearchTest(unittest.TestCase):
     def test_complete_core_uses_fixed_rules(self):
         r = run()
@@ -223,6 +256,101 @@ class PrelaunchResearchTest(unittest.TestCase):
         self.assertEqual(r['invalid'][0]['status'], '失效')
         self.assertEqual(r['frozen_records'][0]['state'], 'invalid')
         self.assertEqual(r['frozen_records'][0]['support'], 9.9)
+
+    def test_same_day_breakout_recalculation_stays_started(self):
+        data = fixture()
+        data['stocks'][0]['bars'][-1].update(open=10.9, high=10.92, low=10.88, close=10.9)
+        first = run(data)
+        self.assertLess(first['started'][0]['metrics']['5日涨幅%'], 12)
+        again = run(data, previous=first)
+        self.assertEqual(len(again['started']), 1)
+        self.assertEqual(again['watch'], [])
+        self.assertEqual(again['core'], [])
+        self.assertEqual(again['frozen_records'], first['frozen_records'])
+        self.assertEqual(again['started'][0]['frozen_id'], first['started'][0]['frozen_id'])
+
+    def test_acceleration_cooling_does_not_reopen_same_probe(self):
+        data = fixture()
+        for bar in data['stocks'][0]['bars'][:-4]:
+            bar['high'] = 12.
+        data['stocks'][0]['bars'][-1].update(open=11.3, high=11.32, low=11.28, close=11.3)
+        first = run(data)
+        self.assertGreater(first['started'][0]['metrics']['5日涨幅%'], 12)
+        self.assertLess(first['started'][0]['bars'][-1]['close'], first['frozen_records'][0]['upper'])
+        following = run_day(next_day(data, 10.25), first)
+        self.assertLess(following['started'][0]['metrics']['5日涨幅%'], 12)
+        self.assertEqual(following['watch'], [])
+        self.assertEqual(following['core'], [])
+        self.assertEqual(following['frozen_records'], first['frozen_records'])
+        self.assertEqual(following['started'][0]['valid_until'], first['started'][0]['valid_until'])
+
+    def test_retreat_below_broken_out_upper_keeps_started_identity(self):
+        data = fixture()
+        data['stocks'][0]['bars'][-1].update(open=10.9, high=10.92, low=10.88, close=10.9)
+        first = run(data)
+        following = run_day(next_day(data, 10.3), first)
+        self.assertEqual(len(following['started']), 1)
+        self.assertEqual(following['watch'], [])
+        self.assertEqual(following['frozen_records'], first['frozen_records'])
+        self.assertEqual(following['started'][0]['frozen_id'], first['started'][0]['frozen_id'])
+
+    def test_failed_structure_stays_invalid_after_recovery_or_acceleration(self):
+        data = fixture()
+        old = run(data)
+        failed_data = next_day(data, 9.8)
+        failed = run_day(failed_data, old)
+        self.assertEqual(failed['invalid'][0]['status'], '失效')
+        for close in (10.2, 11.5):
+            with self.subTest(close=close):
+                recovered = run_day(next_day(failed_data, close), failed)
+                self.assertEqual(recovered['watch'], [])
+                self.assertEqual(recovered['core'], [])
+                self.assertEqual(recovered['started'], [])
+                self.assertEqual(recovered['invalid'][0]['status'], '失效')
+                self.assertEqual(recovered['frozen_records'], failed['frozen_records'])
+
+    def test_started_structure_can_downgrade_to_invalid_without_new_window(self):
+        data = fixture()
+        data['stocks'][0]['bars'][-1].update(open=10.9, high=10.92, low=10.88, close=10.9)
+        started = run(data)
+        failed_data = next_day(data, 9.8)
+        failed = run_day(failed_data, started)
+        self.assertEqual(failed['started'], [])
+        self.assertEqual(failed['invalid'][0]['status'], '失效')
+        for key in ('id', 'frozen_at', 'probe_date', 'support', 'upper', 'valid_until', 'ended_at'):
+            self.assertEqual(failed['frozen_records'][0][key], started['frozen_records'][0][key])
+        self.assertEqual(failed['frozen_records'][0]['invalidated_at'], failed_data['signal_date'])
+
+    def test_probe_within_finished_cycle_does_not_create_new_platform(self):
+        data = fixture()
+        first = run(data)
+        failed_data = next_day(data, 10.3, volume=2000.)
+        failed_data['stocks'][0]['bars'][-1].update(low=10.2, high=10.32)
+        failed_data['stocks'][0]['security']['risk_clear'] = False
+        failed = run_day(failed_data, first)
+        self.assertEqual(failed['invalid'][0]['status'], '失效')
+        after = next_day(failed_data, 10.29)
+        after['stocks'][0]['security']['risk_clear'] = True
+        reviewed = run_day(after, failed)
+        self.assertEqual(reviewed['watch'], [])
+        self.assertEqual(reviewed['core'], [])
+        self.assertEqual(reviewed['frozen_records'], failed['frozen_records'])
+
+    def test_probe_after_finished_cycle_can_start_independent_research(self):
+        data = fixture()
+        first = run(data)
+        failed_data = next_day(data, 9.8)
+        failed = run_day(failed_data, first)
+        fresh_data = next_day(failed_data, 10.1, volume=2000.)
+        fresh_data['stocks'][0]['bars'][-1].update(low=10.05, high=10.11)
+        fresh = run_day(fresh_data, failed)
+        self.assertEqual(len(fresh['frozen_records']), 2)
+        self.assertEqual(fresh['frozen_records'][0], failed['frozen_records'][0])
+        new_record = fresh['frozen_records'][1]
+        self.assertEqual(new_record['state'], 'active')
+        self.assertGreater(new_record['probe_date'], failed['frozen_records'][0]['ended_at'])
+        self.assertNotEqual(new_record['id'], failed['frozen_records'][0]['id'])
+        self.assertEqual(fresh['watch'][0]['frozen_id'], new_record['id'])
 
     def test_five_trading_day_window(self):
         r = run()

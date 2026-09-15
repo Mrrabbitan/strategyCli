@@ -168,8 +168,13 @@ def _freeze(stock, bars, metrics, day, records):
         active = None
     probe = metrics.get('probe')
     if not active and probe:
-        # The same old probe cannot create a new window after expiration/failure.
-        if not any(r.get('probe_date') == probe['date'] for r in matching):
+        # A terminal cycle remains terminal. Even a different probe from within
+        # that cycle cannot reopen it; an independent probe must follow its end.
+        previous = matching[-1] if matching else None
+        ended = max(previous.get('ended_at', previous['frozen_at']),
+                    previous.get('invalidated_at', '')) if previous else None
+        if (not any(r.get('probe_date') == probe['date'] for r in matching)
+                and (ended is None or probe['date'] > ended)):
             i = probe['index']
             platform = bars[i-20:i]
             if len(platform) == 20:
@@ -183,6 +188,10 @@ def _freeze(stock, bars, metrics, day, records):
                 active['anchor_fingerprint'] = fingerprint([
                     {k: b[k] for k in ('date', 'open', 'high', 'low', 'close')} for b in platform])
                 records.append(active)
+    # Return the old structure for tracking, not as a fresh active platform.
+    # Its identity and original observation dates must survive proxy cooling.
+    if not active and matching:
+        active = matching[-1]
     if active and active.get('adjustment_basis') != basis:
         return active, '复权基准改变，冻结结构须同基准复核'
     if active:
@@ -263,17 +272,21 @@ def _stock_result(stock, data, reviews, records, day, market, industries):
     if limit_conflict:
         cond.append(_condition('历史涨停来源无冲突', None, '人工复核与已核验日线存在冲突；保留涨停风险，不用新证据覆盖已知涨停'))
     frozen, freeze_error = _freeze(stock, bars, m, day, records)
-    cond.append(_condition('冻结平台与结构支撑', None if freeze_error or not frozen else True,
+    frozen_active = bool(frozen and frozen.get('state') == 'active')
+    cond.append(_condition('冻结平台与结构支撑', None if freeze_error or not frozen else frozen_active,
                            freeze_error or (f"{frozen['platform_start']}至{frozen['platform_end']}，首次冻结于{frozen['frozen_at']}" if frozen else '无可用冻结平台，或本轮已到期')))
     close = bars[-1]['close']
     broken = bool(frozen and not freeze_error and close < frozen['support'])
     launched = bool(frozen and not freeze_error and close > frozen['upper'])
-    if frozen and (broken or launched or accelerated or security_ok is False):
-        frozen.update(state='invalid' if broken or security_ok is False else 'started', ended_at=day,
-                      reason='结构支撑失效或证券硬风险' if broken or security_ok is False else '已突破冻结平台或触发加速')
+    if frozen and (broken or security_ok is False):
+        if frozen.get('state') != 'invalid':
+            frozen.update(state='invalid', invalidated_at=day, reason='结构支撑失效或证券硬风险')
+            frozen.setdefault('ended_at', day)
+    elif frozen_active and (launched or accelerated):
+        frozen.update(state='started', ended_at=day, reason='已突破冻结平台或触发加速')
     probe = m['probe']
     held = False
-    if probe and frozen and not freeze_error:
+    if probe and frozen and frozen.get('state') == 'active' and not freeze_error:
         after = bars[probe['index']+1:]
         held = len(after) >= 2 and statistics.median(b['volume_shares'] for b in after) < probe['volume_shares'] and close >= probe['low']
         held = held and all(b['close'] >= frozen['support'] for b in after)
@@ -329,12 +342,12 @@ def _stock_result(stock, data, reviews, records, day, market, industries):
     business_known = type(business_level) is int and business_level in (0, 1, 2)
     cond.append(_condition('业务/催化事实已完成核验', True if business_known else None, '催化可为0分，但未核验不填0；已发生事件不加未来催化分'))
     cond.append(_condition('20日成交额排序依据有效', True if m['amount20_median'] is not None else None, '不可用收盘价乘成交量估算真实成交额'))
-    if broken or security_ok is False:
+    prior_state = frozen.get('state') if frozen else None
+    if broken or security_ok is False or prior_state == 'invalid':
         row['status'] = '失效'
-    elif accelerated or launched:
+    elif accelerated or launched or prior_state == 'started':
         row['status'] = '已启动'
-    elif not frozen and any(r.get('code') == code and r.get('state') == 'expired'
-                            and (not probe or r.get('probe_date') == probe['date']) for r in records):
+    elif prior_state == 'expired':
         row['status'] = '观察到期'
         row['reasons'].append('五个交易日观察结束，旧试盘不得自动延长；等待新信号重新筛选')
     elif any(c['passed'] is None for c in cond):
@@ -345,6 +358,8 @@ def _stock_result(stock, data, reviews, records, day, market, industries):
         row['eligible'] = True
     else:
         row['status'] = '观察'
+    if prior_state in ('started', 'invalid'):
+        row['reasons'].append('本轮已启动或失效状态保留；加速指标回落或价格修复不恢复潜伏资格，须有旧轮结束日之后的新试盘另建平台。')
     # Scores are complete only when all their inputs (not their outcomes) exist.
     outperform = finite(industry.get('outperform_market_days5'))
     if industry_known and rs5 is not None and net_rr is not None and business_known and outperform is not None:
