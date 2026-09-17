@@ -91,7 +91,7 @@ python3 refresh_research.py --module yichujifa --input "$AUTOSTRATEGY_PRIVATE_RO
 
 ## 规则与验证
 
-三策略登记在 [docs/playbooks/registry.json](docs/playbooks/registry.json)，各自完整说明见 [STRATEGY.md](STRATEGY.md)。规则版本与研究结果分开记录；公开分数和阈值是研究假设，不是胜率或收益保证。
+三策略登记在 [docs/playbooks/registry.json](docs/playbooks/registry.json)，各自完整说明见 [STRATEGY.md](STRATEGY.md)。规则版本与研究结果分开记录；公开分数和阈值是研究假设，不是胜率或收益保证。合并持仓、自选与既有名单时，使用[三梯队复核流程](docs/playbooks/decision-review.md)，保持账户时点、研究顺序和各策略资格独立。
 
 运行离线回归：
 
