@@ -1,9 +1,7 @@
 (() => {
   'use strict';
   const $ = s => document.querySelector(s);
-  const model = JSON.parse($('#dashboard-data').textContent);
-  const esc = v => String(v ?? '—').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
-  let activePage = 'hot', reportIndex = 0, busy = false, version = null, timer;
+  let activePage = 'hot', busy = false, version = null, timer;
   function switchPage(next) {
     if (!['hot','dragon','yichujifa','prelaunch','strategy','reports'].includes(next)) next = 'reports';
     activePage = next;
@@ -12,7 +10,6 @@
       el.classList.toggle('active', el.dataset.page === next);
       if (el.dataset.page === next) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
     });
-    if (next === 'reports' && !$('#report-frame').childElementCount) showReport(reportIndex);
   }
   function locateHash() {
     let id;
@@ -28,25 +25,13 @@
     history.replaceState(null, '', `#page-${b.dataset.page}`); switchPage(b.dataset.page); window.scrollTo({top:0});
   }));
   window.addEventListener('hashchange', locateHash);
-  $('#report-tabs').innerHTML = model.reports.map((x,i) => `<button data-report="${i}" aria-pressed="${i===0}">${esc(x.label)}</button>`).join('');
-  function showReport(i) {
-    reportIndex = i; const row = model.reports[i]; if (!row) return;
-    document.querySelectorAll('[data-report]').forEach(b => b.setAttribute('aria-pressed', String(Number(b.dataset.report)===i)));
-    $('#report-state').textContent = `${model.report_date} · ${row.label}${row.url ? ' · 历史记录' : ' · 尚无核验记录'}`;
-    $('#report-full').hidden = !row.url;
-    if (row.url) {
-      $('#report-full').href = row.url;
-      $('#report-frame').innerHTML = `<iframe class="report-iframe" sandbox="" title="${esc(row.label)}历史记录" src="${esc(row.url)}"></iframe>`;
-    } else $('#report-frame').innerHTML = '<p class="notice">此时点没有通过核验的记录，不使用其他日期填补。</p>';
-  }
-  document.querySelectorAll('[data-report]').forEach(b => b.addEventListener('click', () => showReport(Number(b.dataset.report))));
   async function get(url) {
     const response = await fetch(url, {cache:'no-store', signal:AbortSignal.timeout(8000)});
     if (!response.ok) throw new Error('unavailable');return response.json();
   }
   function saveReading() {
     const filters = [...document.querySelectorAll('[data-research-search]')].map(el => ({module:el.dataset.researchSearch, search:el.value, filter:document.querySelector(`[data-research-filter="${el.dataset.researchSearch}"]`)?.value || 'all'}));
-    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, reportIndex, filters, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
+    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, filters, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
   }
   function filterResearch(module) {
     const panel = document.querySelector(`[data-module="${module}"]`);if (!panel) return;
@@ -108,7 +93,7 @@
     const stored = JSON.parse(sessionStorage.getItem('investment-reading') || 'null');
     sessionStorage.removeItem('investment-reading');
     if (stored) {
-      switchPage(stored.page);showReport(stored.reportIndex);
+      switchPage(stored.page);
       const open = new Set(stored.open || []);
       document.querySelectorAll('details[id]').forEach(el => { el.open = open.has(el.id); });
       (stored.filters || []).forEach(f => {
