@@ -429,4 +429,39 @@ class LateDayNumericReviewTests(unittest.TestCase):
         with self.assertRaises(ValueError):validate_review(bad,cutoff)
 
 
+class LateDayScheduledPreviewTests(unittest.TestCase):
+    def preview(self):
+        at=dt.datetime(2026,1,8,14,20,tzinfo=TZ)
+        engine=load_engine();report=engine.evaluate(sample(at),phase='preview',now=at)
+        report['rule_hash']=source_hash();report['preview_order']=['600001']
+        report['rows'][0].update(observation_rank=1,breakout_reason='Artificial verified structure',
+                                confirmation='Refresh after 14:30',risk='Artificial structure failure')
+        return report
+
+    def test_rank_does_not_grant_trading_qualification(self):
+        from late_day_research import validate_topic,render_topic
+        report=self.preview();topic=topic_payload(report);validate_topic(topic)
+        self.assertEqual(topic['late_day_result']['qualified_count'],0)
+        self.assertFalse(topic['late_day_result']['rows'][0]['research_passed'])
+        page=render_topic(topic,dt.datetime(2026,1,8,14,21,tzinfo=TZ))
+        self.assertIn('Artificial verified structure',page)
+        self.assertIn('Refresh after 14:30',page)
+        self.assertEqual(report['rows'][0]['checks'][1]['passed'],False)
+
+    def test_unknown_or_failed_conditions_cannot_be_ranked(self):
+        from late_day_research import validate_topic
+        for value in (False,None):
+            report=self.preview()
+            next(c for c in report['rows'][0]['checks'] if c['id']=='market')['passed']=value
+            with self.assertRaises(ValueError):validate_topic(topic_payload(report))
+        report=self.preview();report['coverage']['verified']=False
+        with self.assertRaises(ValueError):validate_topic(topic_payload(report))
+
+    def test_ranking_limited_to_ten_without_skips(self):
+        from late_day_research import validate_topic
+        for rank in (0,2,11,True):
+            report=self.preview();report['rows'][0]['observation_rank']=rank
+            with self.assertRaises(ValueError):validate_topic(topic_payload(report))
+
+
 if __name__=='__main__':unittest.main()

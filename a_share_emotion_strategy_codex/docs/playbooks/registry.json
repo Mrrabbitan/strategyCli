@@ -177,7 +177,7 @@
     {
       "id": "late-day",
       "name": "尾盘隔夜战法",
-      "version": "1.1.0",
+      "version": "1.2.0",
       "source_url": null,
       "source_label": "本机尾盘隔夜Skill；与公开发行包逐字核验",
       "source_hash_scope": [
@@ -185,6 +185,7 @@
         "agents/openai.yaml",
         "references/rules.md",
         "references/data.md",
+        "references/scheduled-preview.md",
         "scripts/engine.py",
         "scripts/run.py",
         "scripts/validate_input.py"
@@ -211,7 +212,7 @@
         "次日10:00结束本轮隔夜计划，无论盈亏；T+1及卖出受阻仍需标明，不虚构成交。"
       ],
       "limits": [
-        "按需调用，不新增定时任务，不承诺自动在10:00通知；不自动下单或设个人仓位。",
+        "支持按需及用户授权的14:00/14:20预观察；不承诺次日10:00自动提醒，不自动下单或设个人仓位。",
         "不混用其他策略评分、量能基准和退出条件，不自动加入龙空龙资金监测。",
         "这些阈值是研究默认值；测试通过不证明赚钱；分钟规则不证明逐笔从未跌破。"
       ],
@@ -220,7 +221,7 @@
         "无真实持仓只提供条件式退出，不认定盈利；无合格股不补位。",
         "来源原文与名单私有留档；失败不把旧结果重新标为最新。"
       ],
-      "source_hash": "sha256:02143bf50c9d3bdb3ae70cb25fed7ccba0445fd977cc45b24dd2da3457369ae4"
+      "source_hash": "sha256:4a40ab647d10463c833b9c4ae7df4416e48eb044d7e1a62e54138a8172ac4761"
     }
   ]
 }
