@@ -50,6 +50,15 @@
   document.querySelectorAll('[data-research-filter]').forEach(el => el.addEventListener('change',()=>filterResearch(el.dataset.researchFilter)));
   function expireResearch() {
     const now = Date.now();
+    document.querySelectorAll('[data-late-day-until]').forEach(el => {
+      const until = Date.parse(el.dataset.lateDayUntil);
+      if (Number.isFinite(until) && now > until && !el.dataset.lateDayExpired) {
+        el.dataset.lateDayExpired = 'true';
+        const status = el.querySelector('.late-day-status');
+        if (status && !/尚未执行|执行失败/.test(status.textContent)) status.textContent = '历史记录 · 当前研究通过0只，需重新核验；历史判断不授予当前资格。';
+        el.querySelectorAll('.late-day-candidate-state').forEach(row => {row.textContent='历史判断，不授予当前资格';});
+      }
+    });
     document.querySelectorAll('[data-context-until]').forEach(el => {
       if (now > Date.parse(el.dataset.contextUntil)) { el.textContent = '历史盘中背景 · 需重新取得报价';el.removeAttribute('data-context-until'); }
     });

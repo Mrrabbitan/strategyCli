@@ -131,6 +131,11 @@ def validate(data, now):
     if stocks and any(not isinstance(data.get(k), str) or not data[k] for k in ('comparison_scope', 'comparison_method')):
         raise ValueError('Stock comparison needs scope and method')
     _decision_tiers(data, codes)
+    if 'late_day_result' in data:
+        if data['topic_id'] != 'late-day':
+            raise ValueError('Late-day payload belongs to its own topic')
+        from late_day_research import validate_topic
+        validate_topic(data)
     return data
 
 
@@ -243,6 +248,10 @@ def render_topics(*, now=None):
             data = validate(read_json(path), now)
         except (ValueError, TypeError, AttributeError, KeyError):
             sections.append('<p class="notice">一份独立专题资料不可用；其他研究继续展示。</p>')
+            continue
+        if 'late_day_result' in data:
+            from late_day_research import render_topic
+            sections.append(render_topic(data, now))
             continue
         state = ('观察窗口已结束，以下仅为历史研究' if stamp(data['valid_until']) < now else
                  '资料不足，等待核验' if data['status'] != 'complete' else '本轮专题研究已完成')

@@ -44,6 +44,9 @@ def verified_reports(report_date, slots=None):
 
 
 def research_status(strategy):
+    if strategy == 'late-day':
+        from late_day_research import status
+        return status()
     from research_modules import load_module
     current = load_module(strategy)
     data = current['data']
@@ -57,7 +60,7 @@ def render_playbooks():
     cards = []
     for play in registry.get('playbooks', []):
         sid = play['id']
-        if sid not in ('prelaunch', 'yichujifa', 'dragon'):
+        if sid not in ('prelaunch', 'yichujifa', 'dragon', 'late-day'):
             continue
         state = research_status(sid)
         facts = ''.join(f'<li>{e(x)}</li>' for x in play.get('conditions', []))

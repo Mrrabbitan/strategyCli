@@ -1,0 +1,4 @@
+interface:
+  display_name: "尾盘隔夜战法"
+  short_description: "主板尾盘量价筛选与次日十点退出复核，区分条件通过、待验证和历史结果"
+  default_prompt: "请使用 $a-share-late-day 核验尾盘候选、缺失证据与次日退出条件。"

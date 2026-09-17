@@ -91,7 +91,24 @@ python3 refresh_research.py --module yichujifa --input "$AUTOSTRATEGY_PRIVATE_RO
 
 ## 规则与验证
 
-三策略登记在 [docs/playbooks/registry.json](docs/playbooks/registry.json)，各自完整说明见 [STRATEGY.md](STRATEGY.md)。规则版本与研究结果分开记录；公开分数和阈值是研究假设，不是胜率或收益保证。合并持仓、自选与既有名单时，使用[三梯队复核流程](docs/playbooks/decision-review.md)，保持账户时点、研究顺序和各策略资格独立。
+四项策略规则登记在 [docs/playbooks/registry.json](docs/playbooks/registry.json)，各自完整说明见 [STRATEGY.md](STRATEGY.md)。原三种策略保持独立结果页；尾盘隔夜结果位于时点报告，仍为六入口。规则版本与研究结果分开记录；公开分数和阈值是研究假设，不是胜率或收益保证。合并持仓、自选与既有名单时，使用[三梯队复核流程](docs/playbooks/decision-review.md)，保持账户时点、研究顺序和各策略资格独立。
+
+### 尾盘隔夜：按需执行，不是新增监控服务
+
+安装独立技能：`python3 late_day_research.py --install-skill`。安装后可自然语言调用，或显式使用 `$a-share-late-day`。公开发行包与本机安装版的内容指纹必须一致，避免页面规则和实际执行分叉。
+
+```sh
+# 获取公开初筛及补证原文；未经核验的口径保持待验证。
+python3 late_day_research.py --collect --max-details 30
+# 导入经过核验的同一证据契约，自动保存和发布页面。
+python3 late_day_research.py --input /path/to/private/verified-evidence.json --phase live
+# 历史复盘不授予当前资格；次日复核阶段为 next-open。
+python3 late_day_research.py --input /path/to/private/historical-evidence.json --phase review
+```
+
+无参数只登记“尚未执行”，不会抓行情。接口原文、正常名称或收盘数据不能自动证明当日证券状态、有效股本、历史实际涨停价、分钟时间标签/竞价种子、完整主板广度或固定行业归属；公共采集器保留这些缺口，补证后再导入，不能把初筛当作合格结果。`--codes`可限定范围，详情上限只是采集预算；全部原始初筛和完整计算结果留在私有目录。
+
+规则：14:30—14:57前新增，次日风险优先、10:00结束本轮计划；按需调用不保证无人执行时自动提醒。输入契约见 [尾盘数据说明](docs/playbooks/late-day-skill/references/data.md)。脚本可独立对虚构输入计算，不需账户、私有配置或交易权限；不会发送订单。证据必须使用原始时点，缺失不补造；一分钟规则不是逐笔“全天不破黄线”的证明。当前只完成规则与离线验收，真实盘中时效及扣费后收益尚未验证。
 
 运行离线回归：
 
