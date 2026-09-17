@@ -111,7 +111,7 @@ class LateDayRulesTests(unittest.TestCase):
         self.data['coverage']['verified']=False
         self.assertEqual(self.evaluate()['qualified_count'],0)
 
-    def test_qualified_order_and_five_display_cap(self):
+    def test_all_qualified_rows_preserve_turnover_order(self):
         first=self.data['stocks'][0]
         rows=[]
         for i in range(1,7):
@@ -126,7 +126,19 @@ class LateDayRulesTests(unittest.TestCase):
             rows.append(stock)
         self.data['stocks']=rows;self.data['coverage'].update(universe_count=6,scanned_count=6)
         result=self.evaluate();self.assertEqual(result['qualified_count'],6)
-        self.assertEqual(result['display_codes'],['600006','600005','600004','600003','600002'])
+        self.assertEqual(result['display_codes'],['600006','600005','600004','600003','600002','600001'])
+        historical=self.evaluate(phase='review',now=self.at+dt.timedelta(hours=5))
+        self.assertEqual(historical['qualified_count'],0)
+        self.assertEqual(historical['historical_pass_count'],6)
+        historical['rule_hash']=source_hash()
+        self.assertEqual(len(topic_payload(historical)['late_day_result']['rows']),6)
+
+    def test_unknown_coverage_is_not_historical_pass(self):
+        self.data['coverage']['verified']=False
+        r=self.evaluate(phase='review')
+        self.assertEqual(r['historical_pass_count'],0)
+        self.assertFalse(r['rows'][0]['research_passed'])
+        self.assertEqual(r['rows'][0]['decision_state'],'insufficient')
 
     def test_below_ninety_percent_rejected(self):
         for row in self.data['stocks'][0]['minutes'][:23]:row['close']='10.25'
@@ -261,15 +273,25 @@ class LateDayPublicationTests(unittest.TestCase):
         with self.assertRaises(ValueError):frozen_positions([p],self.e)
         self.assertEqual(frozen_positions([],self.e),old)
 
-    def test_six_pages_four_rule_cards_and_no_web_execution(self):
+    def test_seven_pages_late_day_moved_old_links_and_no_web_execution(self):
         from build_investment_site import build
         run_research(now=self.at,rebuild=False)
         out=build(self.at.date());page=(out/'latest.html').read_text()
-        for name in ('hot','dragon','yichujifa','prelaunch','strategy','reports'):
+        for name in ('hot','dragon','yichujifa','prelaunch','late-day','strategy','reports'):
             self.assertIn('id="page-'+name+'"',page)
         self.assertIn('id="strategy-late-day"',page);self.assertIn('id="topic-late-day"',page)
-        self.assertNotIn('id="page-late-day"',page)
+        late=page.split('<section id="page-late-day"',1)[1].split('<section id="page-strategy"',1)[0]
+        reports=page.split('<section id="page-reports"',1)[1]
+        self.assertIn('id="topic-late-day"',late)
+        self.assertNotIn('id="topic-late-day"',reports)
         self.assertNotIn('/Users/',page);self.assertNotIn('frozen_positions.json',page)
+
+    def test_placeholder_does_not_block_actual_earlier_market_cutoff(self):
+        run_research(now=self.at+dt.timedelta(hours=6),rebuild=False)
+        r=run_research(self.data,phase='review',now=self.at+dt.timedelta(hours=7),rebuild=False)
+        saved=read_json(research_path('late_day/latest_attempt.json'))
+        self.assertEqual(saved['as_of'],self.data['as_of'])
+        self.assertEqual(saved['historical_pass_count'],1)
 
     def test_malformed_special_topic_is_isolated(self):
         from research_store import atomic_json
@@ -317,6 +339,26 @@ class LateDayPublicationTests(unittest.TestCase):
         self.assertEqual(result['qualified_count'],0)
         self.assertTrue(result['missing']);self.assertFalse(data['coverage']['verified'])
 
+    def test_collection_all_mode_does_not_stop_at_thirty_or_one_quote_batch(self):
+        from late_day_feeds import collect
+        now=dt.datetime.now(TZ);codes=[str(600000+i) for i in range(1,66)]
+        batch_sizes=[]
+        class Feed:
+            def read(self,url,encoding='utf-8'):
+                if 'qt.gtimg.cn/q=' not in url:return '{}',{'url':url}
+                requested=[s[-6:] for s in url.split('q=',1)[1].split(',')]
+                batch_sizes.append(len(requested));lines=[]
+                for code in requested:
+                    f=['0']*90
+                    for i,value in {1:'Artificial fixture',2:code,3:'10.4',4:'10',6:'211000',
+                                    30:now.strftime('%Y%m%d%H%M%S'),33:'10.5',37:'21732',38:'10',45:'104',47:'11',49:'3'}.items():f[i]=value
+                    lines.append('v_sh'+code+'="'+'~'.join(f)+'";')
+                return ''.join(lines),{'url':url}
+        with patch('late_day_feeds.calendar_payload',return_value=sample(now)['calendar']):
+            data=collect(now,codes=codes,feed=Feed())
+        self.assertEqual(len(data['stocks']),65)
+        self.assertFalse(data['coverage']['bounded']);self.assertTrue(all(n<=60 for n in batch_sizes))
+
     def test_actual_parallel_publications_keep_latest_cutoff(self):
         from concurrent.futures import ThreadPoolExecutor
         report=self.e.evaluate(self.data,now=self.at);report['rule_hash']=source_hash()
@@ -327,6 +369,64 @@ class LateDayPublicationTests(unittest.TestCase):
             list(pool.map(lambda r:publish_report(r,rebuild=False),[newer,report]))
         self.assertEqual(read_json(research_path('late_day/latest_attempt.json'))['as_of'],newer['as_of'])
         self.assertEqual(read_json(research_path('topics/late-day/current.json'))['as_of'],newer['as_of'])
+
+
+class LateDayNumericReviewTests(unittest.TestCase):
+    def fixture(self):
+        at=dt.datetime(2026,1,8,14,30,tzinfo=TZ)
+        previous=['2025-12-31','2026-01-02','2026-01-05','2026-01-06','2026-01-07']
+        source={'label':'Artificial data','url':'https://example.org/fixture','time':at.isoformat()}
+        stock={'code':'600001','name':'Artificial numeric audit','minute_date':'2026-01-08',
+            'quote':{'time':at.isoformat(),'price':'10.4','reference_close':'10','volume_shares':'30000000',
+                     'provider_float_a_shares':'300000000','provider_total_shares':'1000000000',
+                     'provider_turnover_pct':'10','provider_cap_yi':'104'},
+            'history':[{'date':day,'volume_shares':'8000000'} for day in previous],
+            'minutes':[{'time':(at+dt.timedelta(minutes=i)).isoformat(),'price':'10.4',
+                        'volume_shares':str(25000000+i*100000),'amount_cny':str(260000000+i*1040000)} for i in range(27)],
+            'sources':[source]}
+        return stock,at,previous
+
+    def test_numeric_match_is_only_pending_never_qualified(self):
+        from late_day_review import review_stock
+        stock,at,previous=self.fixture();r=review_stock(stock,at.date(),previous)
+        self.assertEqual(r['state'],'pending');self.assertEqual(r['numeric_hit_count'],27)
+        self.assertNotIn('qualified_count',r)
+        self.assertEqual(r['representative']['time'],'2026-01-08T14:56:00+08:00')
+
+    def test_missing_duplicate_cross_day_and_conflict_are_unknown(self):
+        from late_day_review import review_stock
+        for kind in ('missing','duplicate','cross_day','history','shares','volume'):
+            stock,at,previous=self.fixture()
+            if kind=='missing':stock['minutes'].pop(3)
+            elif kind=='duplicate':stock['minutes'].insert(3,copy.deepcopy(stock['minutes'][3]))
+            elif kind=='cross_day':stock['minute_date']='2026-01-07'
+            elif kind=='history':stock['history'][0]['date']='2025-12-30'
+            elif kind=='shares':stock['quote']['provider_total_shares']='900000000'
+            else:stock['minutes'][5]['volume_shares']='100'
+            r=review_stock(stock,at.date(),previous)
+            self.assertEqual(r['state'],'unavailable',kind);self.assertEqual(r['numeric_hit_count'],0)
+            self.assertIsNone(r['representative'])
+
+    def test_rounded_display_does_not_relax_intervals(self):
+        from late_day_review import review_stock
+        stock,at,previous=self.fixture()
+        for r in stock['minutes']:r['price']='10.600000001'
+        r=review_stock(stock,at.date(),previous)
+        self.assertEqual(r['state'],'numeric_rejected')
+        self.assertIn('pct',r['representative']['failed'])
+
+    def test_audit_schema_blocks_private_fields_and_future_evidence(self):
+        from late_day_review import review_stock,validate_review,render_review
+        stock,at,previous=self.fixture();row=review_stock(stock,at.date(),previous);row.pop('frames')
+        data={'window_start':at.isoformat(),'window_end':(at+dt.timedelta(minutes=26)).isoformat(),
+              'validation_day':'2026-01-09','quote_count':1,'universe_count':1,'rows':[row],
+              'sources':[],'notes':['Artificial review only']}
+        cutoff=(at+dt.timedelta(hours=1)).isoformat()
+        validate_review(data,cutoff);self.assertIn('600001',render_review(data))
+        bad=copy.deepcopy(data);bad['rows'][0]['private_position']='DO-NOT-PUBLISH'
+        with self.assertRaises(ValueError):validate_review(bad,cutoff)
+        bad=copy.deepcopy(data);bad['rows'][0]['representative']['time']='2026-01-09T14:30:00+08:00'
+        with self.assertRaises(ValueError):validate_review(bad,cutoff)
 
 
 if __name__=='__main__':unittest.main()

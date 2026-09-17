@@ -3,7 +3,7 @@
   const $ = s => document.querySelector(s);
   let activePage = 'hot', busy = false, version = null, timer;
   function switchPage(next) {
-    if (!['hot','dragon','yichujifa','prelaunch','strategy','reports'].includes(next)) next = 'reports';
+    if (!['hot','dragon','yichujifa','prelaunch','late-day','strategy','reports'].includes(next)) next = 'reports';
     activePage = next;
     document.querySelectorAll('.page').forEach(el => { el.hidden = el.id !== `page-${next}`; });
     document.querySelectorAll('[data-page]').forEach(el => {
@@ -56,7 +56,7 @@
         el.dataset.lateDayExpired = 'true';
         const status = el.querySelector('.late-day-status');
         if (status && !/尚未执行|执行失败/.test(status.textContent)) status.textContent = '历史记录 · 当前研究通过0只，需重新核验；历史判断不授予当前资格。';
-        el.querySelectorAll('.late-day-candidate-state').forEach(row => {row.textContent='历史判断，不授予当前资格';});
+        el.querySelectorAll('.late-day-candidate-state').forEach(row => {if (!row.textContent.startsWith('历史')) row.textContent=`历史判断 · ${row.textContent}；不授予当前资格`;});
       }
     });
     document.querySelectorAll('[data-context-until]').forEach(el => {

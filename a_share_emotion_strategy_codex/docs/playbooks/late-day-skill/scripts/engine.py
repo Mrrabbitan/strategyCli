@@ -8,13 +8,14 @@ import json
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo('Asia/Shanghai')
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 RATIO_METHOD = 'cumulative_per_minute_over_previous5_full_day_per_minute'
 SCOPE = 'includes_opening_auction'
 LABELS = {'security':'证券资格', 'time':'尾盘时间', 'price':'涨幅3%—6%',
           'ratio':'量比2—5', 'turnover':'换手6%—15%', 'cap':'总市值60—300亿',
           'touch':'此前20日触板', 'vwap':'分钟均价线强势', 'market':'市场与行业',
           'failed_limit':'当日冲板失败否决', 'distance':'偏离均价不超过3%'}
+NUMERIC_BOUNDS = {'pct':(3,6), 'volume_ratio':(2,5), 'turnover_pct':(6,15), 'cap_yi':(60,300)}
 
 
 def number(value):
@@ -72,9 +73,31 @@ def provisional_filter(q):
     """Only provider-number preselection; never grants final qualification."""
     try:
         pct=(number(q['price'])/number(q['reference_close'])-1)*100
-        return (3<=pct<=6 and 2<=number(q['provider_ratio'])<=5
-                and 6<=number(q['provider_turnover_pct'])<=15 and 60<=number(q['provider_cap_yi'])<=300)
+        return all(numeric_checks({'pct':pct,'volume_ratio':q['provider_ratio'],
+                   'turnover_pct':q['provider_turnover_pct'],'cap_yi':q['provider_cap_yi']}).values())
     except (ValueError,KeyError,ArithmeticError): return None
+
+
+def numeric_checks(values):
+    """Shared intervals, with raw precision; no security or trading eligibility."""
+    return {key:low <= number(values[key]) <= high for key,(low,high) in NUMERIC_BOUNDS.items()}
+
+
+def numeric_snapshot(*, price, reference_close, volume_shares, mean5_volume,
+                     float_a, total, at):
+    """Arithmetic for an observed historical snapshot, never a complete signal.
+
+    Callers must separately audit timestamps, units, share effectiveness, minute
+    boundaries and the remaining rules. This helper grants no qualification.
+    """
+    p,ref,vol,avg,flt,shares = map(number,(price,reference_close,volume_shares,mean5_volume,float_a,total))
+    elapsed=elapsed_minutes(stamp(at))
+    if min(p,ref,vol,avg,flt,shares,elapsed)<=0 or flt>shares:
+        raise ValueError('数值初筛字段或单位无效')
+    values={'pct':(p/ref-1)*100,'volume_ratio':vol/elapsed/(avg/240),
+            'turnover_pct':vol/flt*100,'cap_yi':p*shares/100000000}
+    return {'values':{k:str(v) for k,v in values.items()},'checks':numeric_checks(values),
+            'eligible':False}
 
 
 def fresh(obj, at, times):
@@ -185,7 +208,7 @@ def evaluate_stock(stock, data, at, days):
     def price():
         q = quote(); value = (number(q['price']) / number(q['reference_close']) - 1) * 100
         metrics['pct'] = float(value)
-        return 3 <= value <= 6, f'当前相对参考昨收 {value:.6f}%'
+        return NUMERIC_BOUNDS['pct'][0] <= value <= NUMERIC_BOUNDS['pct'][1], f'当前相对参考昨收 {value:.6f}%'
 
     def history():
         meta = stock['history_meta']
@@ -216,17 +239,17 @@ def evaluate_stock(stock, data, at, days):
                 raise ValueError('原生与计算量比不一致')
             origin = '已核验原生量比'
         metrics.update(volume_ratio=float(value), computed_ratio=float(computed))
-        return 2 <= value <= 5, f'{origin} {value:.6f}'
+        return NUMERIC_BOUNDS['volume_ratio'][0] <= value <= NUMERIC_BOUNDS['volume_ratio'][1], f'{origin} {value:.6f}'
 
     def turnover():
         q, s = quote(), shares(); value = number(q['volume_shares']) / number(s['float_a']) * 100
         metrics['turnover_pct'] = float(value)
-        return 6 <= value <= 15, f'成交股数/流通A股股数 {value:.6f}%'
+        return NUMERIC_BOUNDS['turnover_pct'][0] <= value <= NUMERIC_BOUNDS['turnover_pct'][1], f'成交股数/流通A股股数 {value:.6f}%'
 
     def cap():
         q, s = quote(), shares(); value = number(q['price']) * number(s['total']) / 100000000
         metrics['cap_yi'] = float(value)
-        return 60 <= value <= 300, f'A股价×总股本 {value:.6f}亿元（A+H同此筛选口径）'
+        return NUMERIC_BOUNDS['cap_yi'][0] <= value <= NUMERIC_BOUNDS['cap_yi'][1], f'A股价×总股本 {value:.6f}亿元（A+H同此筛选口径）'
 
     def touch():
         rows = history(); dates = [r['date'] for r in rows if number(r['high']) == number(r['upper_limit'])]
@@ -365,11 +388,6 @@ def evaluate(data, *, as_of=None, phase='auto', now=None, positions=None):
     if len(codes) != len(set(codes)) or any(len(c)!=6 or not c.isdigit() for c in codes):
         raise ValueError('重复或无效代码')
     results = [evaluate_stock(s, data, at, days) for s in rows]
-    for r in results:
-        r['research_passed'] = r['state'] == 'qualified'
-        if phase == 'review' or (phase == 'live' and not live): r['state'] = 'historical'
-        if phase == 'preview': r['state'] = 'preview'
-        if phase == 'next-open': r['state'] = 'exit_review'
     cov = data.get('coverage', {})
     coverage_ok = (cov.get('verified') is True and cov.get('scanned_count') == len(rows)
                    and isinstance(cov.get('universe_count'),int) and cov['universe_count'] >= len(rows)
@@ -377,8 +395,18 @@ def evaluate(data, *, as_of=None, phase='auto', now=None, positions=None):
     if not coverage_ok:
         for r in results:
             if r['state']=='qualified': r['state']='insufficient'
+    for r in results:
+        # Preserve the actual decision when the presentation becomes historical.
+        # Unknown coverage must not become a historical pass either.
+        r['decision_state'] = r['state']
+        r['research_passed'] = r['state'] == 'qualified'
+        if phase == 'review' or (phase == 'live' and not live): r['state'] = 'historical'
+        if phase == 'preview': r['state'] = 'preview'
+        if phase == 'next-open': r['state'] = 'exit_review'
     qualified = [r for r in results if r['state']=='qualified']
     qualified.sort(key=lambda r:(-number(r['amount_cny']), r['code']))
+    historical_passes = sorted((r for r in results if r['research_passed']),
+                               key=lambda r:(-number(r['amount_cny']), r['code']))
     incomplete = any(r['evidence_missing'] for r in results) or not coverage_ok or data.get('collection_error')
     state = ('insufficient' if incomplete else 'qualified' if qualified else 'empty')
     if phase in ('preview','review','next-open'): state = phase
@@ -390,7 +418,9 @@ def evaluate(data, *, as_of=None, phase='auto', now=None, positions=None):
         exits.append(dict(code=p['code'], position_id=p['id'], **review_exit(p,s,at,days)))
     return {'schema_version':1, 'strategy':'late-day', 'rule_version':VERSION, 'as_of':at.isoformat(),
             'generated_at':now.isoformat(), 'valid_until':max(at,expiry).isoformat(), 'phase':phase,
-            'state':state, 'qualified_count':len(qualified), 'display_codes':[r['code'] for r in qualified[:5]],
+            'state':state, 'qualified_count':len(qualified),
+            'historical_pass_count':len(historical_passes),
+            'display_codes':[r['code'] for r in historical_passes],
             'coverage':cov, 'rows':results, 'exits':exits, 'input_fingerprint':fingerprint(data),
             'missing':(['覆盖或关键证据不足；不是成功空池'] if incomplete else []),
             'limitations':['规则一致性校验不是收益回测；不自动下单、不保证成交',

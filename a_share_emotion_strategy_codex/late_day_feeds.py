@@ -25,6 +25,8 @@ def parse_quotes(body, source):
                 'amount_cny':float(f[37])*10000,'high':f[33],'upper_limit':f[47],
                 'scope':'includes_opening_auction','ratio_verified':False,
                 'provider_ratio':f[49],'provider_turnover_pct':f[38],'provider_cap_yi':f[45]}
+            result[f[2]].update(low=f[34],provider_float_a_shares=f[72] if len(f)>73 else None,
+                               provider_total_shares=f[73] if len(f)>73 else None)
         except (ValueError,IndexError): continue
     return result
 
@@ -34,7 +36,7 @@ def numeric_prefilter(q, engine=None):
     return (engine or load_engine()).provisional_filter(q)
 
 
-def collect(at, *, codes=None, max_details=30, feed=None):
+def collect(at, *, codes=None, max_details=None, feed=None):
     if at.tzinfo is None or at>dt.datetime.now(TZ): raise ValueError('采集时点无效')
     if (dt.datetime.now(TZ)-at).total_seconds()>90:
         raise ValueError('历史时点只能导入对应证据，不能以当前行情回填')
@@ -68,7 +70,8 @@ def collect(at, *, codes=None, max_details=30, feed=None):
         candidates=[x['quote'] for x in preliminary if x['passed'] is True]
         if codes: candidates=list(found.values()) # explicit scope preserves rejected observations too
         candidates.sort(key=lambda q:(-float(q['amount_cny']),q['code']))
-        selected=candidates[:max(1,min(max_details,500))]
+        if max_details is not None and max_details<1: raise ValueError('详情预算须为正数')
+        selected=candidates if max_details is None else candidates[:max_details]
         data['coverage'].update(prefilter_count=len(found),numeric_pass_count=sum(x['passed'] is True for x in preliminary),
                                 detail_target=len(candidates),scanned_count=len(selected),bounded=len(selected)<len(candidates))
         if len(found)!=len(target): missing.append('报价覆盖不足，不称全市场')
@@ -99,7 +102,13 @@ def collect(at, *, codes=None, max_details=30, feed=None):
         # Re-read shortlisted quotes at completion; do not label prefetch prices
         # with the newer clock from historical/minute requests.
         if selected:
-            latest=quotes([q['code'] for q in selected])
+            latest={}
+            selected_codes=[q['code'] for q in selected]
+            with concurrent.futures.ThreadPoolExecutor(max_workers=4) as pool:
+                tasks=[pool.submit(quotes,selected_codes[i:i+60]) for i in range(0,len(selected_codes),60)]
+                for future in tasks:
+                    try: latest.update(future.result())
+                    except Exception as exc: missing.append('完成复核报价批次失败：'+type(exc).__name__)
             for stock in data['stocks']:
                 if stock['code'] in latest: stock['quote']=latest[stock['code']]
         missing.append('证券状态、有效股本、逐日真实涨停价、分钟标签/竞价种子、固定行业及完整主板广度待核验；原文已留私有补证目录')

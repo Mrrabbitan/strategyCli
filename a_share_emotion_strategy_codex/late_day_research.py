@@ -91,21 +91,24 @@ def topic_payload(report):
     selected=report.get('display_codes',[])
     all_rows=report.get('rows',[])
     order={code:i for i,code in enumerate(selected)}
-    rows=sorted(all_rows,key=lambda x:(order.get(x['code'],99),x['code']))[:5]
-    safe_rows=[{k:r.get(k) for k in ('code','name','state','checks','metrics','source_time','research_passed','sources')}
+    rows=sorted(all_rows,key=lambda x:(order.get(x['code'],10001),x['code']))
+    safe_rows=[{k:r.get(k) for k in ('code','name','state','decision_state','checks','metrics','source_time','price','research_passed','sources')}
                for r in rows]
     exits=[{k:x.get(k) for k in ('code','state','reasons','missing','sell_day','execution')}
            for x in report.get('exits',[])]
-    summary=(f"{STATE_NAMES.get(state,state)}；本时点研究通过{report.get('qualified_count',0)}只。"
-             '不授予其他策略资格，不自动下单；最多展示5项，完整证据仅在本地。')
-    return {'schema_version':1,'topic_id':'late-day','title':'尾盘隔夜战法 · 按需时点研究',
+    historical_count=sum(r.get('research_passed') is True for r in rows)
+    summary=(f"{STATE_NAMES.get(state,state)}；研究截面通过{historical_count}只，当前有效{report.get('qualified_count',0)}只。"
+             '完整展示，不按前5只截断；不是预期收益排名，原始证据仅在本地。')
+    return {'schema_version':1,'topic_id':'late-day','title':'尾盘隔夜战法 · 完整研究结果',
             'as_of':report['as_of'],'generated_at':report['generated_at'],'valid_until':report['valid_until'],
             'status':'unavailable' if state in ('failed','not_run') else 'partial' if report.get('missing') else 'complete',
             'summary':summary,'changes':['本策略与龙空龙、一触即发、潜伏独立；退出不受14:30限制。'],
             'missing':report.get('missing',[]),'directions':[],'sources':[],
             'late_day_result':{'state':state,'rule_version':report['rule_version'],
               'rule_hash':report['rule_hash'],'coverage':report.get('coverage',{}),
-              'qualified_count':report.get('qualified_count',0),'rows':safe_rows,'exits':exits}}
+              'qualified_count':report.get('qualified_count',0),'historical_pass_count':historical_count,
+              'rows':safe_rows,'exits':exits,
+              'numeric_review':report.get('numeric_review')}}
 
 
 def publish_report(report, *, rebuild=True):
@@ -115,7 +118,8 @@ def publish_report(report, *, rebuild=True):
         old=read_json(folder/'latest_attempt.json',{})
         digest=hashlib.sha256(json.dumps(report,sort_keys=True,ensure_ascii=False).encode()).hexdigest()
         atomic_json(folder/'history'/f'{digest}.json',report)
-        if old and (old['as_of']>report['as_of'] or old['generated_at']>report['generated_at']):
+        if old and (old['generated_at']>report['generated_at'] or
+                    (old.get('state') not in ('not_run','failed') and old['as_of']>report['as_of'])):
             return {'changed':False,'reason':'newer research already published'}
         atomic_json(folder/'latest_attempt.json',report)
         if report['state'] not in ('failed','not_run','insufficient') and not report.get('missing'):
@@ -176,7 +180,7 @@ def validate_topic(data):
     result=data['late_day_result']
     if not isinstance(result,dict) or result.get('state') not in STATE_NAMES:
         raise ValueError('Invalid late-day topic')
-    if not isinstance(result.get('rows'),list) or len(result['rows'])>5:
+    if not isinstance(result.get('rows'),list) or len(result['rows'])>10000:
         raise ValueError('Invalid late-day display count')
     if (not isinstance(result.get('rule_hash'),str) or not isinstance(result.get('rule_version'),str)
             or type(result.get('qualified_count')) is not int or not 0<=result['qualified_count']<=10000
@@ -186,6 +190,9 @@ def validate_topic(data):
         if (not isinstance(row,dict) or any(not isinstance(row.get(k),str) for k in ('code','name','state'))
                 or not isinstance(row.get('sources'),list) or len(row['sources'])>10):
             raise ValueError('Invalid late-day row')
+        if (row.get('decision_state') is not None and row['decision_state'] not in STATE_NAMES
+                or (row.get('research_passed') is not None and type(row['research_passed']) is not bool)):
+            raise ValueError('Invalid historical decision')
         if not isinstance(row.get('checks'),list) or len(row['checks'])>15:
             raise ValueError('Invalid late-day checks')
         for check in row['checks']:
@@ -200,6 +207,23 @@ def validate_topic(data):
         if (not isinstance(x,dict) or not isinstance(x.get('code'),str) or not isinstance(x.get('state'),str)
                 or any(not isinstance(x.get(k,[]),list) or any(not isinstance(t,str) for t in x.get(k,[])) for k in ('reasons','missing'))):
             raise ValueError('Invalid late-day exit')
+    if result.get('numeric_review') is not None:
+        from late_day_review import validate_review
+        validate_review(result['numeric_review'],data['as_of'])
+
+
+def render_page(now=None):
+    """Read the existing private snapshot; never execute a scan in the renderer."""
+    from research_topics import validate
+    now=now or dt.datetime.now(TZ)
+    data=read_json(research_path('topics/late-day/current.json'),{})
+    if not data:
+        return '<section id="topic-late-day" class="playbook"><h2>尚未执行</h2><p>没有尾盘研究快照，未执行不等于无合格股票。</p><a href="#strategy-late-day">查看规则</a></section>'
+    try:
+        validate(data,now)
+        return render_topic(data,now)
+    except (ValueError,TypeError,AttributeError,KeyError):
+        return '<section id="topic-late-day" class="playbook"><h2>数据不足</h2><p>本次尾盘资料校验失败，不恢复旧资格；其他策略不受影响。</p></section>'
 
 
 def render_topic(data, now):
@@ -208,9 +232,12 @@ def render_topic(data, now):
     expired=dt.datetime.fromisoformat(data['valid_until'])<now
     headline=STATE_NAMES[r['state']]
     if expired and r['state'] not in ('not_run','failed'): headline='历史记录 · '+headline
-    cards=[]
+    cards=[]; overview=[]; buckets={'qualified':0,'insufficient':0,'rejected':0,'preview':0}
     for row in r['rows']:
-        label='历史判断，不授予当前资格' if expired else STATE_NAMES.get(row['state'],row['state'])
+        decision=row.get('decision_state') or ('qualified' if row.get('research_passed') else
+                    'rejected' if any(c['passed'] is False for c in row['checks']) else 'insufficient')
+        buckets[decision]=buckets.get(decision,0)+1
+        label=('历史判断 · ' if expired or r['state']=='review' else '')+STATE_NAMES.get(decision,decision)
         checks=''.join('<tr><td>'+e(c['label'])+'</td><td>'+{True:'通过',False:'不满足',None:'待验证'}[c['passed']]
                        +'</td><td>'+e(c['detail'])+'</td></tr>' for c in row['checks'])
         links=[]
@@ -218,11 +245,14 @@ def render_topic(data, now):
             url=urlsplit(source['url'])
             if url.scheme in ('https','http') and url.netloc and not url.username and not url.password:
                 links.append(f'<li><a href="{e(source["url"])}" target="_blank" rel="noopener noreferrer">{e(source["label"])}</a> · {e(source.get("source_time") or "来源时点另见原始证据")}</li>')
-        cards.append(f'<article class="research-stock"><h3>{e(row["name"])} {e(row["code"])}</h3>'
+        reasons='；'.join(c['label'] for c in row['checks'] if c['passed'] is False) or ('证据待补' if decision=='insufficient' else '见逐项证据')
+        overview.append(f'<tr><td><a href="#late-day-stock-{e(row["code"])}">{e(row["name"])} {e(row["code"])}</a></td>'
+                        f'<td>{e(label)}</td><td>{e(row.get("price") or "未取得")}</td><td>{e(reasons)}</td></tr>')
+        cards.append(f'<details class="research-stock" id="late-day-stock-{e(row["code"])}"><summary>{e(row["name"])} {e(row["code"])} · {e(STATE_NAMES.get(decision,decision))}</summary>'
                      f'<p class="late-day-candidate-state">{e(label)}</p><p>源时间 {e(row.get("source_time"))}</p>'
                      '<div class="table-scroll"><table><thead><tr><th>条件</th><th>核验</th><th>证据与缺口</th></tr></thead>'
                      f'<tbody>{checks}</tbody></table></div><details id="late-day-source-{e(row["code"])}"><summary>来源与时点</summary><ul>{"".join(links)}</ul></details>'
-                     '<p>无实际持仓时仅给情景：次日风险优先，10:00结束本轮计划；成交未知。</p></article>')
+                     '<p>无实际持仓时仅给情景：次日风险优先，10:00结束本轮计划；成交未知。</p></details>')
     exit_text=''.join(f'<li>{e(x["code"])} · {e(x["state"])} · {e("；".join(x.get("reasons",[])))} '
                       f'· {e("；".join(x.get("missing",[])))} · 未确认成交</li>' for x in r['exits'])
     missing=''.join(f'<li>{e(x)}</li>' for x in data.get('missing',[]))
@@ -231,12 +261,25 @@ def render_topic(data, now):
     coverage_text=(f"详情 {coverage.get('scanned_count','未提供')}/{coverage.get('universe_count','未提供')}；"
                    f"初筛行情 {coverage.get('prefilter_count','未提供')} 项。{coverage.get('description','尚未执行')}")
     cutoff_label='研究请求截止（行情未取得）' if r['state'] in ('not_run','failed') else '行情截止'
+    historical_count=sum(row.get('research_passed') is True for row in r['rows'])
+    overview_table=('<div class="table-scroll"><table><thead><tr><th>股票</th><th>研究判断</th><th>截面价格</th><th>阻断条件</th></tr></thead>'
+                    f'<tbody>{"".join(overview)}</tbody></table></div>') if overview else ''
+    from late_day_review import render_review
+    numeric_review=render_review(r.get('numeric_review'))
+    research_summary=(f'本研究截面：完整通过 <b>{historical_count}</b> 只；待验证 {buckets.get("insufficient",0)} 只；'
+                      f'条件不满足 {buckets.get("rejected",0)} 只。全部 {len(r["rows"])} 条完整规则记录，不截断为前5只。')
+    if numeric_review and not r['rows']:
+        research_summary='完整策略合格名单：尚无可确认通过项。基础数值复核与数据不足项在下方分别列示。'
     return (f'<section class="playbook" id="topic-late-day" data-late-day-until="{e(data["valid_until"])}">'
             f'<h2>{e(data["title"])}</h2><p class="notice late-day-status">{e(headline)}；当前研究通过 <span class="late-day-count">{count}</span> 只。</p>'
             f'<p>{cutoff_label} {e(data["as_of"])} · 执行 {e(data["generated_at"])} · 有效至 {e(data["valid_until"])}</p>'
             f'<p>规则 {e(r["rule_version"])} · 指纹 {e(r["rule_hash"][:12])} · 静态专题不授予交易资格</p>'
             f'<p>覆盖：{e(coverage_text)}</p><ul>{missing}</ul>'
-            +(''.join(cards) or '<p>没有可展示候选；请区分未执行、资料不足和有效空池。</p>')
+            f'<p class="late-day-historical-count">{research_summary}</p>'
+            '<p>过去满足条件与当前有效资格分别计数；证据不足不代表全市场没有符合股票。</p>'
+            +numeric_review
+            +overview_table
+            +(''.join(cards) or ('<p>完整资格名单：暂无可确认通过项；数值复核与待补证据见上方。</p>' if numeric_review else '<p>没有可展示候选；请区分未执行、资料不足和有效空池。</p>'))
             +f'<h3>次日退出复核</h3><ul>{exit_text or "<li>持仓未知，只提供情景，不认定已买入或盈利。</li>"}</ul>'
             '<p>本策略按需运行，不承诺自动在10:00通知。真实盘中时效需交易日验收；规则测试不证明收益。</p>'
             '<a href="#strategy-late-day">查看尾盘战法规则</a></section>')
@@ -246,7 +289,7 @@ def main():
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--input',type=Path);p.add_argument('--as-of',type=dt.datetime.fromisoformat)
     p.add_argument('--phase',choices=('auto','preview','live','review','next-open'),default='auto')
-    p.add_argument('--collect',action='store_true');p.add_argument('--codes');p.add_argument('--max-details',type=int,default=30)
+    p.add_argument('--collect',action='store_true');p.add_argument('--codes');p.add_argument('--max-details',type=int)
     p.add_argument('--no-build',action='store_true');p.add_argument('--install-skill',action='store_true')
     a=p.parse_args()
     if a.install_skill:

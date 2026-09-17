@@ -135,7 +135,7 @@ class ViewTests(unittest.TestCase):
         self.assertNotIn('javascript:',links([{'url':'javascript:alert(1)'}]))
         self.assertNotIn('password',links([{'url':'https://user:password@example.com'}]))
 
-    def test_six_navigation_entries_and_unique_ids(self):
+    def test_seven_navigation_entries_and_unique_ids(self):
         class Parser(HTMLParser):
             def __init__(self):super().__init__();self.ids=[];self.nav=[]
             def handle_starttag(self,tag,attrs):
@@ -143,7 +143,7 @@ class ViewTests(unittest.TestCase):
                 if 'id' in attrs:self.ids.append(attrs['id'])
                 if 'data-page' in attrs:self.nav.append(attrs['data-page'])
         p=Parser();p.feed(render_dashboard())
-        self.assertEqual(p.nav,['hot','dragon','yichujifa','prelaunch','strategy','reports'])
+        self.assertEqual(p.nav,['hot','dragon','yichujifa','prelaunch','late-day','strategy','reports'])
         self.assertEqual(len(p.ids),len(set(p.ids)))
 
 

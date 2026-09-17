@@ -239,11 +239,13 @@ def publish_topic(data, *, now=None):
     return {'changed': True, 'fingerprint': digest}
 
 
-def render_topics(*, now=None):
+def render_topics(*, now=None, exclude=()):
     now = now or dt.datetime.now(TZ)
     escape = lambda x: html.escape(str(x), quote=True)
     sections = []
     for path in sorted(research_path('topics').glob('*/current.json')):
+        if path.parent.name in exclude:
+            continue
         try:
             data = validate(read_json(path), now)
         except (ValueError, TypeError, AttributeError, KeyError):
