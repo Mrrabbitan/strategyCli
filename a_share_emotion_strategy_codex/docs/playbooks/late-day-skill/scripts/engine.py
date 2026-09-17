@@ -8,7 +8,7 @@ import json
 from zoneinfo import ZoneInfo
 
 TZ = ZoneInfo('Asia/Shanghai')
-VERSION = '1.2.0'
+VERSION = '1.3.0'
 RATIO_METHOD = 'cumulative_per_minute_over_previous5_full_day_per_minute'
 SCOPE = 'includes_opening_auction'
 LABELS = {'security':'证券资格', 'time':'尾盘时间', 'price':'涨幅3%—6%',

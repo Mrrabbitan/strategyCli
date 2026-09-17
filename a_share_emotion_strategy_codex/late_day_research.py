@@ -6,6 +6,7 @@ import hashlib
 import html
 import importlib.util
 import json
+import math
 from pathlib import Path
 import shutil
 from urllib.parse import urlsplit
@@ -22,6 +23,8 @@ STATE_NAMES = {'not_run':'尚未执行', 'preview':'预观察', 'qualified':'研
                'empty':'已完成筛选，无合格股', 'insufficient':'数据不足', 'failed':'本次执行失败',
                'review':'历史复核', 'next-open':'次日退出复核', 'rejected':'条件不满足',
                'historical':'历史记录', 'exit_review':'退出复核'}
+HOT_FIELDS = ('verified','sector','sector_rank','member_rank','ranking_as_of','target_session',
+              'scope','source','fingerprint','heat_verified','heat_pct','heat_time','heat_source')
 
 
 def source_hash(folder=BUNDLE):
@@ -97,6 +100,9 @@ def topic_payload(report):
     safe_rows=[{k:r.get(k) for k in ('code','name','state','decision_state','checks','metrics','source_time','price','research_passed','sources',
                                      'observation_rank','breakout_reason','confirmation','risk')}
                for r in rows]
+    for safe, row in zip(safe_rows, rows):
+        if isinstance(row.get('hot_leader'), dict):
+            safe['hot_leader']={k:row['hot_leader'].get(k) for k in HOT_FIELDS}
     exits=[{k:x.get(k) for k in ('code','state','reasons','missing','sell_day','execution')}
            for x in report.get('exits',[])]
     historical_count=sum(r.get('research_passed') is True for r in rows)
@@ -179,6 +185,34 @@ def status(now=None):
             'missing':r.get('missing',[]),'link':'#topic-late-day'}
 
 
+def validate_hot_leader(evidence, as_of, quote_time):
+    """Check frozen rank provenance and current heat, without fetching prices."""
+    from market_calendar import previous_trading_day
+    if not isinstance(evidence,dict):
+        raise ValueError('Missing original hot-sector rank evidence')
+    if (evidence.get('verified') is not True or evidence.get('heat_verified') is not True
+            or type(evidence.get('sector_rank')) is not int or not 1<=evidence['sector_rank']<=5
+            or type(evidence.get('member_rank')) is not int or not 1<=evidence['member_rank']<=3
+            or any(not isinstance(evidence.get(k),str) or not evidence[k].strip()
+                   for k in ('sector','scope','source','heat_source','fingerprint'))):
+        raise ValueError('Unverified or out-of-scope hot-sector leader')
+    fingerprint=evidence['fingerprint']
+    if len(fingerprint)!=64 or any(c not in '0123456789abcdef' for c in fingerprint):
+        raise ValueError('Invalid original ranking fingerprint')
+    stamps=[dt.datetime.fromisoformat(x) for x in
+            (as_of,quote_time,evidence['ranking_as_of'],evidence['heat_time'])]
+    if any(x.tzinfo is None for x in stamps):
+        raise ValueError('Hot-sector timestamps require a timezone')
+    at,quote,rank,heat=[x.astimezone(TZ) for x in stamps]
+    value=evidence.get('heat_pct')
+    if (type(value) not in (int,float) or not math.isfinite(value) or value<=0
+            or evidence.get('target_session')!=at.date().isoformat()
+            or rank.date()!=previous_trading_day(at.date()) or rank>at
+            or heat.date()!=at.date() or not 0<=(at-heat).total_seconds()<=90
+            or abs((quote-heat).total_seconds())>60):
+        raise ValueError('Stale ranking or unsupported current sector strength')
+
+
 def validate_topic(data):
     result=data['late_day_result']
     if not isinstance(result,dict) or result.get('state') not in STATE_NAMES:
@@ -211,6 +245,10 @@ def validate_topic(data):
                     or any(c.get('passed') is not True for c in row['checks'] if c.get('id')!='time')
                     or result['coverage'].get('verified') is not True):
                 raise ValueError('Unverified conditions cannot enter the preliminary top ten')
+            # Old research retains its original scope; new scheduled ranks must
+            # carry the additional universe evidence, never a relabelled index.
+            if result['rule_version'] not in ('1.0.0','1.1.0','1.2.0'):
+                validate_hot_leader(row.get('hot_leader'),data['as_of'],row['source_time'])
             ranks.add(rank)
         if not isinstance(row.get('checks'),list) or len(row['checks'])>15:
             raise ValueError('Invalid late-day checks')
@@ -239,7 +277,9 @@ def render_page(now=None):
     now=now or dt.datetime.now(TZ)
     configured=read_json(research_path('late_day/schedule_config.json'),{})
     schedule=('<aside class="notice" id="late-day-schedule"><b>定时计划 · 北京时间</b>'
-              '<p>14:00主板初筛，冻结完整观察池；14:20仅对该池精筛，给最多十只突破潜质观察顺序。休市跳过。</p>'
+              '<p>14:00仅筛热点前五板块、板内原始前三，冻结完整初筛池；14:20仅对该池精筛，给最多十只突破潜质观察顺序。休市跳过。</p>'
+              '<p>原排名来自上一交易日主板收盘涨停池，不是全行业成分排名；两个阶段均复核当日行业仍上涨。'
+              '缺原始名次或热度证据只待验证，前三失败不补第四。旧版研究保留原范围，不代表已执行新筛选。</p>'
               '<p>两个阶段均为预观察；14:30后仍需重新核验，资料不足不凑名额，由你决定操作。'
               '任务启停以Codex任务设置为准，执行依赖电脑、网络和Codex可用，不包含次日10:00自动提醒。</p></aside>') if configured.get('configured') is True else ''
     data=read_json(research_path('topics/late-day/current.json'),{})
@@ -297,10 +337,17 @@ def render_topic(data, now):
     from late_day_review import render_review
     numeric_review=render_review(r.get('numeric_review'))
     ranked=sorted((row for row in r['rows'] if row.get('observation_rank')),key=lambda row:row['observation_rank'])
+    def hot_text(row):
+        h=row.get('hot_leader')
+        if not h: return '旧版结果未应用热点范围限制'
+        return (f"{h['sector']} · 板块第{h['sector_rank']} / 板内原始第{h['member_rank']}；"
+                f"排名 {h['ranking_as_of']} · {h['scope']}；当日行业 {h['heat_pct']}%（{h['heat_time']}）；"
+                f"来源 {h['source']} / {h['heat_source']}")
     preview_rows=''.join(f'<tr><td>{row["observation_rank"]}</td><td><a href="#late-day-stock-{e(row["code"])}">{e(row["name"])} {e(row["code"])}</a></td>'
+                         f'<td>{e(hot_text(row))}</td>'
                          f'<td>{e(row["breakout_reason"])}</td><td>{e(row["confirmation"])}</td><td>{e(row["risk"])}</td></tr>' for row in ranked)
     preview_table=(f'<h3>突破潜质观察顺序 · {len(ranked)}只</h3><p>14:20精筛仅对同日14:00初筛池；最多十只，不是收益概率排名，不授予参与资格。历史报告不代表现在仍满足。</p>'
-                   '<div class="table-scroll"><table><thead><tr><th>顺序</th><th>股票</th><th>排序理由</th><th>仍待确认</th><th>失效与风险</th></tr></thead>'
+                   '<div class="table-scroll"><table><thead><tr><th>顺序</th><th>股票</th><th>热点原排名与当日行业</th><th>排序理由</th><th>仍待确认</th><th>失效与风险</th></tr></thead>'
                    f'<tbody>{preview_rows}</tbody></table></div>') if ranked else ''
     research_summary=(f'本研究截面：完整通过 <b>{historical_count}</b> 只；待验证 {buckets.get("insufficient",0)} 只；'
                       f'条件不满足 {buckets.get("rejected",0)} 只。全部 {len(r["rows"])} 条完整规则记录，不截断为前5只。')

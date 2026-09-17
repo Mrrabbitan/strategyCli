@@ -435,7 +435,13 @@ class LateDayScheduledPreviewTests(unittest.TestCase):
         engine=load_engine();report=engine.evaluate(sample(at),phase='preview',now=at)
         report['rule_hash']=source_hash();report['preview_order']=['600001']
         report['rows'][0].update(observation_rank=1,breakout_reason='Artificial verified structure',
-                                confirmation='Refresh after 14:30',risk='Artificial structure failure')
+                                confirmation='Refresh after 14:30',risk='Artificial structure failure',
+                                hot_leader={'verified':True,'sector':'Fictional industry','sector_rank':5,
+                                            'member_rank':3,'ranking_as_of':'2026-01-07T15:00:00+08:00',
+                                            'target_session':'2026-01-08','scope':'Fictional previous-day limit-up pool',
+                                            'source':'https://example.com/rank','fingerprint':'a'*64,
+                                            'heat_verified':True,'heat_pct':1.2,'heat_time':at.isoformat(),
+                                            'heat_source':'https://example.com/industry'})
         return report
 
     def test_rank_does_not_grant_trading_qualification(self):
@@ -446,7 +452,35 @@ class LateDayScheduledPreviewTests(unittest.TestCase):
         page=render_topic(topic,dt.datetime(2026,1,8,14,21,tzinfo=TZ))
         self.assertIn('Artificial verified structure',page)
         self.assertIn('Refresh after 14:30',page)
+        self.assertIn('Fictional industry',page)
+        self.assertIn('Fictional previous-day limit-up pool',page)
         self.assertEqual(report['rows'][0]['checks'][1]['passed'],False)
+
+    def test_back_ranks_missing_or_stale_heat_cannot_enter_top_ten(self):
+        from late_day_research import validate_topic
+        for key,value in (('sector_rank',6),('member_rank',4),('member_rank',True),
+                          ('verified',False),('heat_verified',False),('heat_pct',0),
+                          ('heat_pct',-1),('heat_pct',float('nan')),('heat_pct',True),
+                          ('target_session','2026-01-07'),('ranking_as_of','2026-01-06T15:00:00+08:00'),
+                          ('ranking_as_of','2026-01-08T15:00:00+08:00'),
+                          ('heat_time','2026-01-08T14:18:00+08:00'),
+                          ('heat_time','2026-01-08T14:20:01+08:00'),('fingerprint','')):
+            with self.subTest(key=key,value=value):
+                report=self.preview();report['rows'][0]['hot_leader'][key]=value
+                with self.assertRaises(ValueError):validate_topic(topic_payload(report))
+        report=self.preview();del report['rows'][0]['hot_leader']
+        with self.assertRaises(ValueError):validate_topic(topic_payload(report))
+
+    def test_hot_metadata_does_not_expose_private_evidence(self):
+        report=self.preview();report['rows'][0]['hot_leader']['private_evidence']='DO-NOT-PUBLISH'
+        self.assertNotIn('DO-NOT-PUBLISH',json.dumps(topic_payload(report)))
+
+    def test_older_preview_keeps_original_scope(self):
+        from late_day_research import validate_topic,render_topic
+        report=self.preview();report['rule_version']='1.2.0'
+        del report['rows'][0]['hot_leader']
+        topic=topic_payload(report);validate_topic(topic)
+        self.assertNotIn('Fictional industry',render_topic(topic,dt.datetime(2026,1,8,14,21,tzinfo=TZ)))
 
     def test_unknown_or_failed_conditions_cannot_be_ranked(self):
         from late_day_research import validate_topic

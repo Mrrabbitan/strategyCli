@@ -31,6 +31,6 @@ positions仅接受用户确认的id,code,confirmed=true,bought_at,cost,entry_sou
 
 报告记录规则/输入指纹、as_of/generated_at/valid_until、phase/state、coverage、rows、qualified_count/historical_pass_count/display_codes、exits、missing。checks使用true/false/null；decision_state保存当时判断，research_passed仅表示证据与覆盖均通过的当时规则判断，eligible始终false，不授予别的策略资格。历史复核的qualified_count为0，但historical_pass_count保留当时通过数。阶段与缺数据独立显示，失败与最近成功分开留档，不以旧名单补位。全部通过项完整展示，不按5项截断；原始记录留本地。
 
-经用户授权的两阶段精筛可以在`preview`报告添加`preview_order`，对应行添加`observation_rank`、`breakout_reason`、`confirmation`、`risk`。最多十个唯一排名，非时间条件及覆盖必须已核验；`qualified_count=0`、`research_passed=false`，排序不修改原计算结论。具体冻结、排名与发布步骤见[两阶段预观察](scheduled-preview.md)。
+经用户授权的两阶段精筛可以在`preview`报告添加`preview_order`，对应行添加`observation_rank`、`breakout_reason`、`confirmation`、`risk`及`hot_leader`热点原始名次与当日行业证据。最多十个唯一排名，热点前五/原始前三范围、当日行业强度、非时间条件及覆盖必须已核验；`qualified_count=0`、`research_passed=false`，排序不修改原计算结论。具体字段、冻结、排名与发布步骤见[两阶段预观察](scheduled-preview.md)。
 
 [AKShare文档](https://akshare.akfamily.xyz/data/stock/stock.html)中的一分钟接口仅覆盖近期资料。先核验实际字段、日期、单位与增量/累计，不因接口名字含“实时”就通过时效；未经核验的数据仅作为补证原文。
