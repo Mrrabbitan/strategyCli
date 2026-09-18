@@ -1,0 +1,6 @@
+interface:
+  display_name: "三步筹码选股"
+  short_description: "逐层核验温和上涨、全池换手及历史封板，区分筹码模型估算和数据不足"
+  default_prompt: "使用 $a-share-three-step 按最近完整交易日筛选沪深主板，列出全部通过项、三步漏斗、获利筹码估算和待验证证据。"
+policy:
+  allow_implicit_invocation: true

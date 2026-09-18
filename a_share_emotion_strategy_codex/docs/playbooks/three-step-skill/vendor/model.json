@@ -1,0 +1,11 @@
+{
+  "version": "AKShare 1.18.60",
+  "license": "MIT",
+  "upstream_url": "https://github.com/akfamily/akshare/blob/main/akshare/stock_feature/stock_cyq_em.py",
+  "python_source_sha256": "7c2a65241da09580e69fb0e16a189514ffa49cf41039cfa15ce4903fa1f08713",
+  "kernel_sha256": "78f022e75328a74c1fa091705b2f9bf95247337512e32ddb2c736176320a719f",
+  "window": 210,
+  "adjustment": "qfq",
+  "provider": "eastmoney",
+  "unit": "fraction_0_1"
+}

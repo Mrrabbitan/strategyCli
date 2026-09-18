@@ -3,7 +3,7 @@
   const $ = s => document.querySelector(s);
   let activePage = 'hot', busy = false, version = null, timer;
   function switchPage(next) {
-    if (!['hot','dragon','yichujifa','prelaunch','late-day','strategy','reports'].includes(next)) next = 'reports';
+    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','strategy','reports'].includes(next)) next = 'reports';
     activePage = next;
     document.querySelectorAll('.page').forEach(el => { el.hidden = el.id !== `page-${next}`; });
     document.querySelectorAll('[data-page]').forEach(el => {
@@ -106,7 +106,7 @@
       const open = new Set(stored.open || []);
       document.querySelectorAll('details[id]').forEach(el => { el.open = open.has(el.id); });
       (stored.filters || []).forEach(f => {
-        if (!['hot','dragon','yichujifa','prelaunch'].includes(f.module)) return;
+        if (!['hot','dragon','yichujifa','prelaunch','three-step'].includes(f.module)) return;
         const search=document.querySelector(`[data-research-search="${f.module}"]`), filter=document.querySelector(`[data-research-filter="${f.module}"]`);
         if(search)search.value=f.search;if(filter)filter.value=f.filter;filterResearch(f.module);
       });

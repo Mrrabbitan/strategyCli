@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_on": "2026-09-17",
+  "updated_on": "2026-09-18",
   "purpose": "公开可复用规则，不含账户或当前研究股票。",
   "playbooks": [
     {
@@ -223,6 +223,56 @@
         "来源原文与名单私有留档；失败不把旧结果重新标为最新。"
       ],
       "source_hash": "sha256:f319631b815b90749f9f0cf20c5a59de05163ba6fb115023dc3033c13a36da8b"
+    },
+    {
+      "id": "three-step",
+      "name": "三步筹码选股法",
+      "version": "1.0.0",
+      "source_url": "https://akshare.akfamily.xyz/data/stock/stock.html#筹码分布",
+      "source_label": "用户确认规则；固定AKShare 1.18.60模型；发行包与本机技能逐字一致",
+      "doc_file": "docs/playbooks/three-step.md",
+      "summary": "全部沪深主板收盘逐层筛选，最终同日估算获利比例>80%；模型结果不等于真实账户盈利。",
+      "steps": [
+        "先核完整主板池和信号日状态、有效流通A股换手；冻结全池排名。",
+        "三日温和上涨且估算获利>60%。",
+        "只在前步通过项保留全池换手前500且估算获利>70%。",
+        "再核60交易日至少3次收盘封板且估算获利>80%，完整展示全部通过项。"
+      ],
+      "conditions": [
+        "最近三日每天收盘严格上涨，累计C[D]/C[D−3]−1≤5%；同截面前复权。",
+        "全池换手=成交股数/当日有效流通A股数；降序、代码升序，固定前500。",
+        "60个完整交易日含信号日；未复权收盘=实际涨停价，历史ST/停牌/无限制日不计。",
+        "三个筹码比例均指同一信号日，严格大于60%/70%/80%；不能四舍五入后判断。",
+        "固定210根完整日K、前复权与原生换手；固定AKShare 1.18.60内核和MIT许可。"
+      ],
+      "exit_rules": [
+        "首版仅收盘观察，不新增买卖阈值、仓位或自动退出规则。",
+        "下一完整收盘后旧结果标历史；数据冲突、资格不明则等待重新核验。"
+      ],
+      "limits": [
+        "估算获利不等于真实盈利账户比例、同花顺数值或主力持仓。",
+        "不凑十只；按全池换手名次展示，不是预期收益排名。",
+        "不改变定时任务或其他策略；T+1、涨跌停与公告风险单列。"
+      ],
+      "missing_behavior": [
+        "全池覆盖或证券状态未知，不能确认换手前500。",
+        "210根不足、复权冲突、历史涨停价缺失则待验证，不替换指标。",
+        "有限重试和同源同日缓存；失败与完整空池分开，保留最后成功结果。"
+      ],
+      "source_hash_scope": [
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/rules.md",
+        "references/data.md",
+        "scripts/engine.py",
+        "scripts/chips_runner.js",
+        "scripts/run.py",
+        "scripts/validate_input.py",
+        "vendor/cyq.js",
+        "vendor/LICENSE",
+        "vendor/model.json"
+      ],
+      "source_hash": "sha256:250f9c0c5fb88cb947c20b6402d5bfa68dffced2aeb9f4fd32b27d06768980fa"
     }
   ]
 }

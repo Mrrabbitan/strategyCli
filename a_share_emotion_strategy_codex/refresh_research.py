@@ -12,6 +12,10 @@ from research_modules import TZ, FOLDERS, stamp, load_module, publish, record_fa
 from build_investment_site import build
 from research_store import private_path
 
+# Preserve existing scheduled tasks. New on-demand strategies require an
+# explicit module selection and must not silently expand historical `all`.
+DEFAULT_MODULES = ('hot', 'dragon', 'yichujifa', 'prelaunch')
+
 
 def choose_phase(now):
     valid, reason = is_trading_day(now.date())
@@ -38,6 +42,9 @@ def _read_input(path, *, frames=False):
 
 
 def run_module(module, now, phase, *, input_data=None, hot=None):
+    if module == 'three-step':
+        from three_step_research import research
+        return research(now, phase=phase, input_data=input_data)
     if isinstance(input_data, dict) and 'module_id' in input_data and input_data['module_id'] != module:
         raise ValueError('Input belongs to a different research module')
     if isinstance(input_data, dict) and input_data.get('module_id') == module:
@@ -138,7 +145,7 @@ def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True)
         tasks = []
         if 'hot' in requested or 'dragon' in requested:
             tasks.append(pool.submit(hot_and_dragon))
-        for module in ('yichujifa', 'prelaunch'):
+        for module in ('yichujifa', 'prelaunch', 'three-step'):
             if module in requested:
                 tasks.append(pool.submit(lambda m=module: [execute(m, input_data)[0]]))
         for task in concurrent.futures.as_completed(tasks):
@@ -161,7 +168,7 @@ def main():
     when = stamp(args.as_of) if args.as_of else dt.datetime.now(TZ)
     if when is None:
         parser.error('Invalid --as-of timestamp')
-    modules = list(FOLDERS) if args.module == 'all' else [args.module]
+    modules = list(DEFAULT_MODULES) if args.module == 'all' else [args.module]
     input_data = _read_input(args.input) if args.input else None
     if args.evidence or args.live_review or args.snapshots:
         if args.module != 'yichujifa' or input_data is None:

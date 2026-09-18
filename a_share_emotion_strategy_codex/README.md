@@ -1,10 +1,10 @@
 # A股研究工作台
 
-这是供当前电脑使用的只读研究页面。它把热点、四套策略和时点报告放在一起，记录依据、等待条件和风险，不管理账户，也不自动下单。
+这是供当前电脑使用的只读研究页面。它把热点、五套策略和时点报告放在一起，记录依据、等待条件和风险，不管理账户，也不自动下单。
 
 本项目提交到公开 `strategyCli` 仓库的内容仅限脱敏源码、可复用规则和人工示例。实际行情、研究名单、报告、图片、个人参数和监控状态留在本机，不随 Git 提交。
 
-## 页面七个入口
+## 页面八个入口
 
 | 入口 | 用途 | 必须分清的边界 |
 | --- | --- | --- |
@@ -13,7 +13,8 @@
 | 一触即发 | 原生三分支筛选、首板锚点、退潮证据及独立盘中复核 | 收盘预资格不是盘中参与信号；历史重放不可充当live |
 | 启动前潜伏 | V3.4数值筛选、冻结平台、最近压力、净空间及四类清单 | 局部初筛不是全市场核心排名；费用或关键证据未知只观察 |
 | 尾盘隔夜 | 完整筛选结果、尾盘数值复核及次日验证记录 | 数值初筛与完整资格分开；历史通过数不能冒充当前有效数量 |
-| 我的策略 | 分别阅读启动前潜伏 V3.4、一触即发、龙空龙、尾盘隔夜 | 四套规则独立，不互借门槛、资金参数或退出条件 |
+| 三步选股 | 三日温和上涨、全池换手前500、60日三次收盘封板的逐层漏斗 | 获利筹码为固定模型估算，最终>80%；缺覆盖不能确认全池排名 |
+| 我的策略 | 分别阅读启动前潜伏 V3.4、一触即发、龙空龙、尾盘隔夜、三步选股 | 五套规则独立，不互借门槛、资金参数或退出条件 |
 | 时点报告 | 阅读有日期的专题研究 | 议息专题放在这里；历史研究不能冒充当前信号 |
 
 原个股计划和 ETF 压舱石不再作为页面或账户处理功能运行。板块研究使用的公共 ETF 行情、份额变化代理仍可保留，与个人 ETF 账户无关。
@@ -49,7 +50,11 @@ python3 refresh_research.py --module hot --phase prepare
 python3 refresh_research.py --module yichujifa --input "$AUTOSTRATEGY_PRIVATE_ROOT/native/report.json" --evidence "$AUTOSTRATEGY_PRIVATE_ROOT/native/evidence.json"
 ```
 
-`--module`支持 `hot/dragon/yichujifa/prelaunch/all`；`--phase`支持 `auto/prepare/intraday/close`；`--as-of`接受上海时间的分析时点，不允许未来时间。历史重放使用截止时已存的原始资料，不能用当前接口补造历史。导入只接受工作台私有目录或本机一触即发运行目录内的JSON，不开放网页执行接口。
+`--module`支持 `hot/dragon/yichujifa/prelaunch/three-step/all`；`all`固定为原四模块，不扩大现有定时任务范围。`--phase`支持 `auto/prepare/intraday/close`；`--as-of`接受上海时间或已完成的`YYYY-MM-DD`（按15:00解析），不允许未来时间。历史重放使用截止时已存的原始资料，不能用当前接口补造历史。导入只接受工作台私有目录或本机一触即发运行目录内的JSON，不开放网页执行接口。
+
+三步选股执行 `python3 refresh_research.py --module three-step`，盘中使用最近完整收盘日。通过 `--input` 导入核验后的原生证据时，仍运行技能重算，不能导入候选结果绕过资格。技能发行包、安装副本与登记指纹一致；首次安装可运行 `python3 -c 'from three_step_research import install_skill; print(install_skill())'`。纯读取构建不需要Node或行情接口，实际筹码计算需要Node（可指定`NODE_BINARY`）。不新增或修改定时任务，不自动交易。公开报价缺完整证券状态、流通股本或历史涨停价时显示数据不足，原始证据/结果/失败/最后成功记录均只在私有 `research/three_step` 保存；页面展示全部通过项，不承诺凑十只。日历补充2025年的依据为[上交所休市公告](https://www.sse.com.cn/disclosure/announcement/general/c/c_20241223_10767108.shtml)，支持210根跨年输入窗口。
+
+三步规则的虚构样例回归可运行 `python3 -m unittest discover -s tests -p 'test_three_step.py'`，完整回归用 `python3 -m unittest discover -s tests -q`。可选浏览器离线测试为 `node tests/test_investment_browser.cjs`（需要Playwright，可通过`PLAYWRIGHT_MODULE`指定模块路径，`BROWSER_EXECUTABLE`指定已有浏览器）。该测试只在临时回环端口服务虚构记录，验证新页签筛选、版本刷新后恢复和过期降级，不读取实际研究、账户或外部行情。测试通过不证明策略收益。
 
 一触即发盘中导入还需 `--live-review` 与 `--snapshots`；潜伏可以用 `--input` 原始数据包加 `--enrichment` 已查阅并绑定信号日/数据/规则指纹的补证。缺证时保持观察；不得为了通过而填入未经核验的标记。一触即发安装缺失则报告不可用，空数据构建不需要安装技能。
 
@@ -61,7 +66,7 @@ python3 refresh_research.py --module yichujifa --input "$AUTOSTRATEGY_PRIVATE_RO
 - 每条研究分别保留分析时间、行情截止、适用窗口、来源、缺失项及规则版本。
 - 独立产业专题通过 `research_topics.publish_topic()` 写入私有 `research/topics/<主题>/current.json`，在时点报告中展示，保留来源发布日、观察期、取得时间和原观察期限；过期只作历史，不进入策略候选池。更换生成时间不产生新证据版本，坏专题不阻断其他页面。
 - 专题保存为有日期的独立记录，放在时点报告中，不自动加入任何交易观察池。
-- 专题可附带个股比较：必须说明比较池、方法、个股价格时点、反证、确认条件与来源。相同股票不得重复计数，同组原始排名只接受前三；展示研究顺序不授予交易资格。`related_modules` 可让同一专题出现在原四个研究入口的相关链接中，兼容原有 `related_module`；尾盘研究使用独立入口，页面共七个主入口。
+- 专题可附带个股比较：必须说明比较池、方法、个股价格时点、反证、确认条件与来源。相同股票不得重复计数，同组原始排名只接受前三；展示研究顺序不授予交易资格。`related_modules` 可让同一专题出现在原四个研究入口的相关链接中，兼容原有 `related_module`；尾盘与三步研究使用独立入口，页面共八个主入口。
 - 可选 `decision_tiers` 包含 `conditional`、`observe`、`exit` 三梯队，每项以代码引用专题 `stocks`，用独立正整数顺序复核，不改变原始前三名次。梯队允许为空、跨梯队不重复；退出项须以 `position_status` 区分持仓退出管理（`held`）与未持仓移出候选（`not_held`）。`context_notes` 只记录本次研究背景，保存在私有专题，不读取或修改账户配置。次日条件尚未发生，静态排序不授予交易资格，原行情截止与到期提示继续有效。
 - `research_comparison.verified_flow_history()` 校验同花顺公开大单历史表：以独立核验的不复权价格匹配到分，合并完全相同的重复记录，排除盘中价、同日冲突和缺日窗口，并复算五日累计。前复权价不能跨除权日用于核验资金表价格；大单分类不等于真实机构身份。
 - 没有实质变化时不制造新版本；仅刷新页面或重写生成时间不算研究更新。

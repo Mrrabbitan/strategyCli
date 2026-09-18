@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from research_store import research_path, read_json, atomic_json, update_lock
 
 TZ = ZoneInfo('Asia/Shanghai')
-FOLDERS = {'hot': 'hot_sectors', 'dragon': 'dragon', 'yichujifa': 'yichujifa', 'prelaunch': 'prelaunch'}
+FOLDERS = {'hot': 'hot_sectors', 'dragon': 'dragon', 'yichujifa': 'yichujifa', 'prelaunch': 'prelaunch', 'three-step':'three_step'}
 STATUSES = {'complete', 'partial', 'empty', 'unavailable'}
 
 
@@ -169,6 +169,8 @@ def publish(module, data, *, attempted_at=None):
         if comparable(old_attempt) != comparable(record):
             changed = True
         atomic_json(module_path(module, 'attempt.json'), record)
+        if module == 'three-step' and status in ('complete', 'empty'):
+            atomic_json(module_path(module).parent / 'last_success.json', data)
     return {'module': module, 'changed': changed, 'status': status}
 
 
