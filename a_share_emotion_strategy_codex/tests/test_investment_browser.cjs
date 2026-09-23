@@ -9,7 +9,7 @@ const path = require('node:path');
 const http = require('node:http');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const js = fs.readFileSync(path.join(__dirname, '../templates/investment.js'), 'utf8');
-const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','strategy','reports'];
+const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','strategy','reports'];
 const panel = `<div data-module="three-step" data-module-until="2099-01-01T15:00:00+08:00">
 <div class="research-status"><b>Research</b></div><p class="module-validity">Fictional fixture</p>
 <span class="qualified-count">1</span><input data-research-search="three-step">
@@ -51,7 +51,12 @@ const server = http.createServer((req,res)=>{
     });
     assert.equal(await page.locator('.qualified-count').textContent(),'0 条');
     assert.equal(await page.locator('[data-candidate][data-bucket="other"]').count(),2);
+    assert.equal(await page.locator('[data-page]').count(),9);
+    await page.locator('[data-page="sector-radar"]').click();
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-radar');
+    await page.locator('[data-page="three-step"]').click();
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-three-step');
     assert.deepEqual(errors,[]);
-    console.log('Offline browser: tab, filtering, reload restoration and expiry passed.');
+    console.log('Offline browser: nine tabs, filtering, reload restoration and expiry passed.');
   } finally {if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

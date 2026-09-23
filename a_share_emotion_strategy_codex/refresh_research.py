@@ -42,6 +42,9 @@ def _read_input(path, *, frames=False):
 
 
 def run_module(module, now, phase, *, input_data=None, hot=None):
+    if module == 'sector-radar':
+        from sector_radar_research import research
+        return research(now, phase=phase, input_data=input_data)
     if module == 'three-step':
         from three_step_research import research
         return research(now, phase=phase, input_data=input_data)
@@ -145,7 +148,7 @@ def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True)
         tasks = []
         if 'hot' in requested or 'dragon' in requested:
             tasks.append(pool.submit(hot_and_dragon))
-        for module in ('yichujifa', 'prelaunch', 'three-step'):
+        for module in ('yichujifa', 'prelaunch', 'three-step', 'sector-radar'):
             if module in requested:
                 tasks.append(pool.submit(lambda m=module: [execute(m, input_data)[0]]))
         for task in concurrent.futures.as_completed(tasks):

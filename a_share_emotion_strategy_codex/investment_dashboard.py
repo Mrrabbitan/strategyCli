@@ -88,6 +88,7 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', **_co
     from research_topics import render_topics, render_topic_links
     from late_day_research import render_page as render_late_day
     from three_step_views import render_page as render_three_step
+    from sector_radar_views import render_page as render_sector_radar
     report_date = report_date or latest_report_date()
     data = {'reports': verified_reports(report_date, slots), 'report_date': str(report_date)}
     values = {
@@ -97,6 +98,7 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', **_co
         '@@RESEARCH_TOPICS@@': render_topics(exclude=('late-day',)),
         '@@LATE_DAY@@': render_late_day(),
         '@@THREE_STEP@@': render_three_step(),
+        '@@SECTOR_RADAR@@': render_sector_radar(),
         '@@HOT_TOPICS@@': render_topic_links('hot'),
         '@@DRAGON_TOPICS@@': render_topic_links('dragon'),
         '@@YICHUJIFA_TOPICS@@': render_topic_links('yichujifa'),

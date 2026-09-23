@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 from research_store import research_path, read_json, atomic_json, update_lock
 
 TZ = ZoneInfo('Asia/Shanghai')
-FOLDERS = {'hot': 'hot_sectors', 'dragon': 'dragon', 'yichujifa': 'yichujifa', 'prelaunch': 'prelaunch', 'three-step':'three_step'}
+FOLDERS = {'hot': 'hot_sectors', 'dragon': 'dragon', 'yichujifa': 'yichujifa', 'prelaunch': 'prelaunch', 'three-step':'three_step', 'sector-radar':'sector_radar'}
 STATUSES = {'complete', 'partial', 'empty', 'unavailable'}
 
 
@@ -34,6 +34,11 @@ def module_path(module, name='current.json'):
 def content_hash(data):
     """Execution clocks are not research changes; source clocks and evidence are."""
     ignore = {'generated_at', 'computed_at', 'published_at', 'imported_at', 'attempted_at', 'run_id', 'run_started_at'}
+    if isinstance(data, dict) and data.get('module_id') == 'sector-radar':
+        # Radar stores every raw attempt separately. Re-reading unchanged dated
+        # evidence is not a new signal; keep quote source clocks and rule hashes.
+        ignore |= {'started_at', 'finished_at', 'requested_at', 'retrieved_at',
+                   'elapsed_seconds', 'input_fingerprint', 'changes'}
     def clean(value):
         if isinstance(value, dict):
             return {key: clean(item) for key, item in value.items() if key not in ignore}
@@ -169,8 +174,12 @@ def publish(module, data, *, attempted_at=None):
         if comparable(old_attempt) != comparable(record):
             changed = True
         atomic_json(module_path(module, 'attempt.json'), record)
-        if module == 'three-step' and status in ('complete', 'empty'):
+        if module in ('three-step', 'sector-radar') and status in ('complete', 'empty'):
             atomic_json(module_path(module).parent / 'last_success.json', data)
+        if module == 'sector-radar':
+            # Keep the latest full failed/partial attempt separate from success.
+            atomic_json(module_path(module).parent / 'latest_attempt.json', data)
+            atomic_json(module_path(module).parent / 'attempts' / (fingerprint + '.json'), data)
     return {'module': module, 'changed': changed, 'status': status}
 
 

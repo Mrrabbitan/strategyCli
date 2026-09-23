@@ -3,7 +3,7 @@
   const $ = s => document.querySelector(s);
   let activePage = 'hot', busy = false, version = null, timer;
   function switchPage(next) {
-    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','strategy','reports'].includes(next)) next = 'reports';
+    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','strategy','reports'].includes(next)) next = 'reports';
     activePage = next;
     document.querySelectorAll('.page').forEach(el => { el.hidden = el.id !== `page-${next}`; });
     document.querySelectorAll('[data-page]').forEach(el => {
@@ -18,6 +18,9 @@
     const target = document.getElementById(id), parent = target?.closest('.page');
     if (!parent) return;
     switchPage(parent.id.slice(5));
+    if (target.matches('[data-radar-detail]') && target.hidden) {
+      const panel=target.closest('[data-module]');panel.querySelector('[data-research-search]').value='';panel.querySelector('[data-research-filter]').value='all';panel.querySelector('[data-radar-group]').value='all';filterResearch('sector-radar');
+    }
     if (target.tagName === 'DETAILS') target.open = true;
     requestAnimationFrame(() => target.scrollIntoView({block:'start'}));
   }
@@ -30,24 +33,44 @@
     if (!response.ok) throw new Error('unavailable');return response.json();
   }
   function saveReading() {
-    const filters = [...document.querySelectorAll('[data-research-search]')].map(el => ({module:el.dataset.researchSearch, search:el.value, filter:document.querySelector(`[data-research-filter="${el.dataset.researchSearch}"]`)?.value || 'all'}));
+    const filters = [...document.querySelectorAll('[data-research-search]')].map(el => ({module:el.dataset.researchSearch, search:el.value, group:el.dataset.researchSearch==='sector-radar' ? document.querySelector('[data-radar-group]')?.value || 'all' : undefined, filter:document.querySelector(`[data-research-filter="${el.dataset.researchSearch}"]`)?.value || 'all'}));
     sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, filters, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
   }
   function filterResearch(module) {
     const panel = document.querySelector(`[data-module="${module}"]`);if (!panel) return;
     const query = panel.querySelector('[data-research-search]').value.trim().toLowerCase();
     const bucket = panel.querySelector('[data-research-filter]').value;
+    const group = module === 'sector-radar' ? panel.querySelector('[data-radar-group]')?.value || 'all' : 'all';
+    const visibleCodes = new Set();
     let count = 0;
     panel.querySelectorAll('[data-candidate]').forEach(el => {
-      el.hidden = !el.dataset.search.toLowerCase().includes(query) || (bucket !== 'all' && el.dataset.bucket !== bucket);
-      if (!el.hidden) count++;
+      el.hidden = !el.dataset.search.toLowerCase().includes(query) || (bucket !== 'all' && el.dataset.bucket !== bucket) || (group !== 'all' && !(el.dataset.radarGroups || '').split(' ').includes(group));
+      if (!el.hidden) { count++; if (el.dataset.radarCode) visibleCodes.add(el.dataset.radarCode); }
     });
+    panel.querySelectorAll('[data-radar-detail]').forEach(el => { el.hidden = !visibleCodes.has(el.dataset.radarDetail); });
     panel.querySelectorAll('.research-group').forEach(el => {el.hidden = ![...el.querySelectorAll('[data-candidate]')].some(card => !card.hidden);});
     panel.querySelector('[data-result-count]').textContent = `${count} 条匹配记录`;
-    panel.querySelector('.filter-empty').hidden = count > 0 || (!query && bucket === 'all');
+    panel.querySelector('.filter-empty').hidden = count > 0 || (!query && bucket === 'all' && group === 'all');
   }
   document.querySelectorAll('[data-research-search]').forEach(el => el.addEventListener('input',()=>filterResearch(el.dataset.researchSearch)));
   document.querySelectorAll('[data-research-filter]').forEach(el => el.addEventListener('change',()=>filterResearch(el.dataset.researchFilter)));
+  document.querySelector('[data-radar-group]')?.addEventListener('change',()=>filterResearch('sector-radar'));
+  function radarCsvCell(value) {
+    let text = String(value ?? '').replace(/\u0000/g, '');
+    // Text-only CSV: spreadsheet software must never execute a supplier formula.
+    if (/^[\s]*[=+@-]/.test(text) || /^[\t\r\n]/.test(text) || /^0\d+$/.test(text)) text = "'" + text;
+    return '"' + text.replace(/"/g, '""') + '"';
+  }
+  function radarCsv(table) {
+    const rows = [...table.querySelectorAll('thead tr'), ...table.querySelectorAll('tbody tr:not([hidden])')];
+    return '\ufeff' + rows.map(row => [...row.cells].map(cell => radarCsvCell(cell.innerText ?? cell.textContent)).join(',')).join('\r\n');
+  }
+  document.querySelector('[data-radar-export]')?.addEventListener('click', () => {
+    const table = document.querySelector('[data-radar-table]'); if (!table) return;
+    const url = URL.createObjectURL(new Blob([radarCsv(table)], {type:'text/csv;charset=utf-8'}));
+    const link = document.createElement('a'); link.href = url; link.download = 'sector-radar-observation.csv';
+    document.body.append(link); link.click(); link.remove(); setTimeout(()=>URL.revokeObjectURL(url),1000);
+  });
   function expireResearch() {
     const now = Date.now();
     document.querySelectorAll('[data-late-day-until]').forEach(el => {
@@ -71,6 +94,8 @@
         panel.querySelector('.qualified-count').textContent = '0 条';
         panel.querySelectorAll('.candidate-state').forEach(el=>{el.textContent='历史记录 · 不取得当前资格';el.classList.remove('positive');});
         panel.querySelectorAll('[data-candidate]').forEach(el=>{el.dataset.bucket='other';});
+        panel.querySelectorAll('.radar-check-state').forEach(el=>{if(!el.textContent.startsWith('历史判断'))el.textContent='历史判断 · '+el.textContent;});
+        panel.querySelectorAll('[data-radar-forward-label]').forEach(el=>{el.textContent='历史前瞻 · 需重新复核';});
         filterResearch(panel.dataset.module);
       }
       panel.querySelectorAll('[data-live-until]').forEach(el=>{
@@ -106,9 +131,11 @@
       const open = new Set(stored.open || []);
       document.querySelectorAll('details[id]').forEach(el => { el.open = open.has(el.id); });
       (stored.filters || []).forEach(f => {
-        if (!['hot','dragon','yichujifa','prelaunch','three-step'].includes(f.module)) return;
+        if (!['hot','dragon','yichujifa','prelaunch','three-step','sector-radar'].includes(f.module)) return;
         const search=document.querySelector(`[data-research-search="${f.module}"]`), filter=document.querySelector(`[data-research-filter="${f.module}"]`);
-        if(search)search.value=f.search;if(filter)filter.value=f.filter;filterResearch(f.module);
+        if(search)search.value=f.search;if(filter)filter.value=f.filter;
+        if(f.module==='sector-radar') { const group=document.querySelector('[data-radar-group]');if(group && [...group.options].some(o=>o.value===f.group))group.value=f.group; }
+        filterResearch(f.module);
       });
       requestAnimationFrame(()=>window.scrollTo(0,stored.scroll));
     }
