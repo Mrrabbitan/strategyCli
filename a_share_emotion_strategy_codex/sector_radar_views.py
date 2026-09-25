@@ -33,7 +33,7 @@ TOP_COVERAGE = {'sectors_expected': '目标板块', 'membership_verified': '成�
                 'announcement_complete': '公告风险复核完整'}
 SECTOR_COVERAGE = {'complete': '覆盖完整', 'membership_verified': '成分已核验',
                    'expected': '源总数', 'received': '收到成分', 'active': '合格主板',
-                   'unknown': '资格待验证', 'history': '日线已核验'}
+                   'unknown': '资格待验证', 'history': '资格已核验主板中的完整日线'}
 
 
 def coverage_line(coverage, labels):
@@ -248,6 +248,66 @@ def forward_section(data, sectors, historical):
     return '<section class="radar-forward"><h2>板块前瞻 · 最多三个方向</h2><p>只比较截图中的12类；以过滤后成分构建等权研究组合，不冒充供应商指数或全市场排名。</p><div class="radar-top-grid">' + (''.join(cards) or '<p class="notice">未发布板块前瞻前三：可能是比较覆盖不足或条件不满足。查看逐板块证据与本次缺口，不据此推断没有机会。</p>') + '</div></section>'
 
 
+def focus_stock(row, historical):
+    label = '潜伏核心观察' if row.get('tier') == 'core' else '待启动形态 · 待验证'
+    if historical:
+        label = '历史复核 · 不取得当前资格'
+    return f'''<article class="radar-top-stock radar-focus-stock"><h4><a href="#{stock_anchor(str(row.get('code')))}">{e(row.get('name'))} <small>{e(row.get('code'))}</small></a></h4>
+<p class="candidate-state">{e(label)} · 非买点</p>
+<p>收盘 {number(row.get('price'))} 元 · 5日 {number(row.get('return_5d_pct'))}% · 20日 {number(row.get('return_20d_pct'))}%</p>
+<p>试盘日 {e(row.get('probe_date'))} · 当前量 / 前20日中位量 {number(row.get('volume_ratio'))}×</p><p>{e(row.get('probe_evidence'))}</p>
+<p>冻结支撑 {number(row.get('support'))} 元 · 冻结上沿 {number(row.get('upper'))} 元 · 最近压力 {number(row.get('pressure'))} 元</p>
+<p>毛空间比 {number(row.get('gross_rr'))} · 扣费空间比 {number(row.get('net_rr'))}；缺费用不升级核心。</p>
+<h5>仍需核验</h5><ul>{lines(texts(row.get('missing'))) or '<li>原生核心条件已核验；后续变化仍需重新确认。</li>'}</ul>
+<p>{e(row.get('confirmation'))}</p><h5>失效与转跟踪条件</h5><ul>{lines(texts(row.get('risks')))}</ul>
+<p class="source-links">{links(row.get('sources'))}</p><a href="#{stock_anchor(str(row.get('code')))}">查看价格量能图与五策略反证 →</a></article>'''
+
+
+def prelaunch_focus_section(data, historical):
+    focus = mapping(data.get('prelaunch_focus'))
+    if not focus:
+        return ''
+    title = '<section class="radar-focus" id="radar-prelaunch-focus"><h2>低位待启动 · 优先复核</h2>'
+    if focus.get('signal_date') != data.get('signal_date') or focus.get('status') == 'unavailable':
+        return title + '<p class="notice">未取得同日有效潜伏证据，不能沿用旧优先名单。</p><ul>' + lines(texts(focus.get('missing'))) + '</ul></section>'
+    groups = []
+    for sector in records(focus.get('sectors')):
+        core = [r for r in records(sector.get('entries')) if r.get('tier') == 'core']
+        pending = [r for r in records(sector.get('entries')) if r.get('tier') != 'core']
+        cards = ''
+        if core:
+            cards += '<h4>第一组 · 原生核心条件完整</h4><div class="radar-top-grid">' + ''.join(focus_stock(r, historical) for r in core) + '</div>'
+        if pending:
+            cards += '<h4>形态优先补证 · 尚非正式候选</h4><div class="radar-top-grid">' + ''.join(focus_stock(r, historical) for r in pending) + '</div>'
+        if not cards:
+            cards = '<p class="notice">本板块暂无同时满足已核验趋势、试盘、缩量承接且无已知否决的待启动形态；留空，不用弱势低价股或已启动股补位。</p>'
+        reasons = ''.join('<li>' + e(r.get('reason')) + '：' + e(r.get('count')) + '只</li>' for r in records(sector.get('rejection_reasons'))[:5])
+        rejected = '<p>未进入优先复核：' + e(sector.get('rejected_count')) + '只（包括明确否决和必需数据不足，不等同于全板块已完成筛选）。</p><ul>' + reasons + '</ul>'
+        near = records(sector.get('near_misses'))
+        if near:
+            rejected += '<details id="radar-near-miss-' + key(sector.get('id')) + '" open><summary>有近似形态但不入第一池 · 反证</summary>'
+            for r in near:
+                rejected += ('<p><a href="#' + stock_anchor(str(r.get('code'))) + '">' + e(r.get('name')) + ' ' + e(r.get('code'))
+                             + '</a>：收盘 ' + number(r.get('price')) + ' 元，冻结支撑 ' + number(r.get('support')) + ' 元，冻结上沿 '
+                             + number(r.get('upper')) + ' 元。</p><ul>' + lines(texts(r.get('failure_reasons'))) + '</ul>')
+            rejected += '<p class="muted">只展示形态接近但存在否决的复核例子，按代码顺序，不是备选推荐或收益排名。</p></details>'
+        started = records(sector.get('started'))
+        tracking = ''
+        if started:
+            rows = ''.join('<tr><td><a href="#' + stock_anchor(str(r.get('code'))) + '">' + e(r.get('name')) + ' ' + e(r.get('code')) + '</a></td><td>'
+                           + number(r.get('price')) + '</td><td>' + number(r.get('return_5d_pct')) + '%</td><td>' + number(r.get('return_20d_pct'))
+                           + '%</td><td>' + e(r.get('native_status')) + '</td></tr>' for r in started)
+            tracking = '<details id="radar-started-' + key(sector.get('id')) + '"><summary>已启动另行跟踪 · ' + str(len(started)) + '只，不列潜伏优先</summary><p class="muted">突破或加速后的状态保留，涨幅回落不恢复本轮潜伏资格；仍需查看五策略与公告风险。</p><div class="table-scroll"><table><thead><tr><th>股票</th><th>收盘 / 元</th><th>5日</th><th>20日</th><th>原生状态</th></tr></thead><tbody>' + rows + '</tbody></table></div></details>'
+        groups.append('<section class="radar-sector"><h3>' + e(sector.get('label')) + '</h3><p class="muted">' + e(sector.get('ordering')) + '。本板块满足形态复核条件 ' + e(sector.get('available_count')) + ' 只，展示最多3只；其余 ' + e(sector.get('omitted_count')) + ' 只保留原生记录。</p>' + cards + rejected + tracking + '</section>')
+    scope_note = mapping(data.get('acquisition')).get('scope_note')
+    return (title + '<p>先看尚未明显加速、已有温和试盘与缩量承接的形态，不把绝对低价或跌幅大当作启动证据。历史涨停、费用、公告或行业等缺口存在时，仅列待验证。</p>'
+            + ('<p class="notice">本轮比较范围：' + e(scope_note) + '。</p>' if scope_note else '')
+            + '<p class="muted">行情截至 ' + e(focus.get('as_of')) + ' · 原规则 V' + e(focus.get('rule_version')) + '。'
+            + e(focus.get('ordering_note')) + '形态复核名额不是正式前三，也不是上涨概率排名。</p>'
+            + ('<p class="notice">本段是历史复核，不取得当前观察或参与资格。</p>' if historical else '')
+            + '<ul>' + lines(texts(focus.get('missing'))) + '</ul>' + ''.join(groups) + '</section>')
+
+
 def render_page(now=None):
     now = now or dt.datetime.now(TZ)
     current = load_module('sector-radar', now=now)
@@ -294,6 +354,7 @@ def render_page(now=None):
 <div class="research-stats"><div><span>信号日 / 行情截至</span><strong>{e(data.get('signal_date') or data.get('as_of'))}</strong></div><div><span>最近执行 · 上海时间</span><strong>{e(attempt.get('attempted_at') or data.get('generated_at'))}</strong></div><div><span>去重股票记录</span><strong>{len(rows)} 条</strong></div><div><span>当前有效收盘观察 / 非买点</span><strong class="qualified-count">{qualified} 条</strong></div></div>
 <div class="notice module-validity" role="status">{e(current.get('note'))}<p>观察有效至 {e(data.get('valid_until'))}。网页只读取报告；五项校验相互独立，通过数量不加分，也不代表现在可以买入。</p></div>
 <p class="coverage-line">{coverage_text or '完整股票池覆盖尚未核验。'}</p><p><a href="#radar-universe">跳到全部股票与五策略矩阵 ↓</a></p><p class="muted">{overlap} 只存在跨板块重叠，全局按代码去重；板块重复持有可能放大主题集中风险。</p>
+{prelaunch_focus_section(data, historical)}
 <details class="research-limitations" id="missing-sector-radar" open><summary>本次缺失证据与执行状态</summary><ul>{lines(missing) or '<li>请逐股核对证券资格、公告风险和原策略证据；研究完成不等于收益有效。</li>'}</ul><ul>{executions}</ul></details>
 {forward_section(data, sectors, historical)}<section class="radar-sectors"><h2>各板块正式观察 · 最多三只</h2><p class="muted">候选必须由至少一项原策略完整支持；排序依据五日相对强度、回撤、收盘位置与成交额等权百分位，未经收益验证。</p>{''.join(sector_section(sector, unique, historical, sector_names) for sector in sectors) or '<p class="notice">尚未取得本轮板块成分；不展示虚构或过期股票池。</p>'}</section>
 <section class="radar-universe" id="radar-universe"><h2>全部股票与五策略矩阵</h2><div class="research-toolbar"><label>查找股票或板块 <input type="search" data-research-search="sector-radar" placeholder="名称、代码或板块" autocomplete="off"></label><label>记录范围 <select data-research-filter="sector-radar"><option value="all">全部记录</option><option value="qualified">收盘观察</option><option value="pending">待验证</option><option value="excluded">已排除</option><option value="other">历史记录</option></select></label><label>所属板块 <select data-radar-group><option value="all">全部板块</option>{options}</select></label><button type="button" class="radar-export" data-radar-export>导出当前筛选 CSV</button><span data-result-count="sector-radar">{len(rows)} 条记录</span></div>

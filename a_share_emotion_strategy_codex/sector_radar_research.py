@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 from research_store import research_path, atomic_json, update_lock
 
 TZ = ZoneInfo('Asia/Shanghai')
-VERSION = 'sector-radar-v1'
+VERSION = 'sector-radar-v1.1'
 SKILLS = ('prelaunch', 'yichujifa', 'dragon', 'late-day', 'three-step')
 
 
@@ -298,7 +298,7 @@ def evaluate(data, checks, now, *, catalog=None):
     if not forward_ready:missing.append('12板块或五策略比较覆盖不完整，暂不发布板块前瞻前三。')
     count=sum(len(s['top_codes']) for s in sectors)
     complete=forward_ready and not missing and all(not s['missing'] for s in sectors)
-    return {'schema_version':1,'module_id':'sector-radar','version':VERSION,'phase':'close','signal_date':signal,'target_date':target,
+    report = {'schema_version':1,'module_id':'sector-radar','version':VERSION,'phase':'close','signal_date':signal,'target_date':target,
             'as_of':signal+'T15:00:00+08:00','generated_at':now.isoformat(),'valid_until':target+'T15:00:00+08:00',
             'status':('complete' if count else 'empty') if complete else 'partial',
             'summary':f'12方向收盘观察；{count}个正式个股席位，{len(forward)}个板块优先复核方向；不授予交易资格。',
@@ -313,6 +313,10 @@ def evaluate(data, checks, now, *, catalog=None):
             'missing':list(dict.fromkeys(missing)),'sectors':sectors,'candidates':list(candidates.values()),'forward_top':forward,
             'executions':checks.get('executions',[]),'sources':data.get('sources',[]),'acquisition':data.get('acquisition',{}),
             'changes':[],'actionable':False,'research_only':True}
+    if checks.get('prelaunch_focus_input'):
+        from sector_radar_focus import build_prelaunch_focus
+        report['prelaunch_focus'] = build_prelaunch_focus(report, checks['prelaunch_focus_input'])
+    return report
 
 
 def research(now, *, phase='auto', input_data=None):

@@ -70,6 +70,18 @@ class SectorRadarSkillsTests(unittest.TestCase):
             s._run_prelaunch(AT, DAY, [self.stock], calendar(),
                             {'prelaunch':{'signal_date': DAY, 'stocks': []}}, False, self.folder)
 
+    def test_archived_invalid_round_cannot_override_current_prelaunch_row(self):
+        fixture = fixtures('prelaunch_research')
+        data = fixture.fixture()
+        report = s._run_prelaunch(AT, DAY, data['stocks'], calendar(),
+             {'prelaunch': data, 'prelaunch_enrichment': fixture.enrichment(data)}, False, self.folder)
+        self.assertEqual(len(report['core']), 1)
+        old = copy.deepcopy(report['core'][0])
+        old.update(status='失效', eligible=False, reasons=['较早独立观察轮次已失效'])
+        report['invalid'].append(old)
+        mapped = s._map_prelaunch(report, ['600000'])
+        self.assertTrue(mapped['600000']['observation_passed'])
+
     def test_dragon_import_rebuilds_original_top_three_and_volume_exit(self):
         signal = '2026-09-07'; at = dt.datetime(2026,9,7,16,tzinfo=s.TZ)
         pool = [{'c': f'60000{i}', 'n': f'人工示例{i}', 'hybk': '示例行业', 'lbc': 2,

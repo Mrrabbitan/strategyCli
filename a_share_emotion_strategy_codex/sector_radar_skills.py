@@ -370,7 +370,9 @@ RUNNERS = {'prelaunch': _run_prelaunch, 'yichujifa': _run_yichujifa, 'dragon': _
 
 
 def _map_prelaunch(report, codes):
-    rows = {r['code']: r for group in ('core', 'watch', 'started', 'invalid') for r in report.get(group, [])}
+    # Invalid includes archived earlier rounds. Current rows must not be
+    # overwritten by an appended historical record with the same stock code.
+    rows = {r['code']: r for group in ('invalid', 'started', 'watch', 'core') for r in report.get(group, [])}
     result = {}
     for code in codes:
         row = rows.get(code)
@@ -530,8 +532,11 @@ def run_checks(as_of, signal_date, stocks, calendar, *, refresh_native=True, sup
     def execute(module):
         folder = root / module
         began = dt.datetime.now(TZ).isoformat()
+        focus_input = None
         try:
             report = RUNNERS[module](at, signal, stocks, calendar, supplied, refresh_native, folder)
+            if module == 'prelaunch':
+                focus_input = report
             cells = MAPPERS[module](report, codes)
             for cell in cells.values():
                 if cell['observation_passed'] and (str(cell.get('as_of', ''))[:10] != signal or
@@ -545,6 +550,7 @@ def run_checks(as_of, signal_date, stocks, calendar, *, refresh_native=True, sup
                          'coverage': report.get('coverage') or {}, 'missing': report.get('missing') or [],
                          'actionable': False}
         except Exception as exc:
+            focus_input = None
             issue = ('本次未执行：' if isinstance(exc, LookupError) else '原生证据执行受阻：') + str(exc)
             # Avoid exposing private paths or subprocess stderr in the page.
             if any(p in issue for p in ('/Users/', '/var/', '/private/', '/tmp/')):
@@ -568,14 +574,16 @@ def run_checks(as_of, signal_date, stocks, calendar, *, refresh_native=True, sup
         for code, reason in excluded.items():
             if reason:
                 cells[code].update(status='failed', observation_passed=False, reasons=[reason])
-        return module, cells, execution
+        return module, cells, execution, focus_input
     with ThreadPoolExecutor(max_workers=4) as pool:
         tasks = [pool.submit(execute, module) for module in MODULES]
         for future in as_completed(tasks):
-            module, cells, execution = future.result()
+            module, cells, execution, focus_input = future.result()
             for code in codes:
                 result['by_code'][code][module] = cells[code]
             result['executions'].append(execution)
+            if focus_input is not None:
+                result['prelaunch_focus_input'] = focus_input
             result['missing'] += [module + '：' + str(x) for x in execution['missing']]
     result['executions'].sort(key=lambda item: MODULES.index(item['module']))
     result['missing'] = list(dict.fromkeys(result['missing']))
