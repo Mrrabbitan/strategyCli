@@ -164,8 +164,8 @@ class RadarFocusTests(unittest.TestCase):
         native['watch'][0]['levels'][-1]['value'] = 10.03
         report['prelaunch_focus'] = build_prelaunch_focus(report, native)
         text = prelaunch_focus_section(report, False)
-        self.assertIn('低位形态优先看', text)
-        self.assertIn('未入选 · 条件未满足', text)
+        self.assertIn('低位形态观察', text)
+        self.assertIn('未入选', text)
         self.assertIn('&lt;script&gt;', text)
         self.assertNotIn('<script>', text)
         self.assertNotIn('虚构空板块', text)

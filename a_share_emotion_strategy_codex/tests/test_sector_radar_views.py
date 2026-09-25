@@ -27,12 +27,13 @@ class SectorRadarViewsTests(unittest.TestCase):
 
     def test_priority_review_names_visible_even_when_not_admitted(self):
         text = self.page()
-        for value in ('虚构甲', '虚构乙', '未入选 · 待补证', '未入选 · 条件未满足', '最近压力下的空间不足'):
+        for value in ('虚构甲', '虚构乙', '仅作观察', '未入选'):
             self.assertIn(value, text)
         self.assertIn('虚构板块甲 / 虚构板块乙', text)
         self.assertEqual(text.count('data-radar-stock="600901"'), 1)
         self.assertIn('id="radar-list-2026-09-24-review" data-radar-list="review"', text)
-        self.assertIn('最近压力 12.10', text)
+        self.assertNotIn('尚待核验', text)
+        self.assertNotIn('核验要点与来源', text)
 
     def test_complete_universe_matrix_and_export_removed_not_merely_hidden(self):
         report = fixture()
@@ -105,13 +106,30 @@ class SectorRadarViewsTests(unittest.TestCase):
         self.assertNotIn('class="radar-sector"', text)
         self.assertNotIn('本次缺失证据与执行状态', text)
 
-    def test_known_long_barrier_shortened_but_original_retained(self):
+    def test_workflow_checklists_stay_private(self):
         report = fixture()
         reason = '已知冻结上沿下的毛空间上限仅 1.100，已小于原规则净空间≥2；更近压力及非负费用只会缩小空间'
         report['prelaunch_focus']['sectors'][0]['near_misses'][0]['failure_reasons'] = [reason]
         text = self.page(report)
-        self.assertIn('毛空间上限 1.100＜2，空间不足', text)
-        self.assertIn(reason, text)
+        self.assertNotIn(reason, text)
+        self.assertNotIn('费用待验证', text)
+        self.assertNotIn('公告待核验', text)
+        self.assertNotIn('后续确认</b>', text)
+        self.assertIn('未入选', text)
+
+    def test_stock_analysis_and_concrete_levels_replace_administrative_details(self):
+        report = fixture()
+        row = report['candidates'][0]
+        row['bars'] = [
+            {'date': '2026-09-23', 'open': 9, 'close': 9, 'low': 8, 'high': 10, 'volume_shares': 1000},
+            {'date': '2026-09-24', 'open': 9, 'close': 10, 'low': 8.5, 'high': 11, 'volume_shares': 2000}]
+        text = self.page(report)
+        self.assertIn('放量上涨', text)
+        self.assertIn('2.00倍', text)
+        self.assertIn('11.11%', text)
+        self.assertIn('数据来源', text)
+        self.assertNotIn('尚待核验', text)
+        self.assertNotIn('费用待验证', text)
 
     def test_no_real_lists_in_public_fixtures_and_nine_pages_remain(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'AUTOSTRATEGY_PRIVATE_ROOT': temp}):

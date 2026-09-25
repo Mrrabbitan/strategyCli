@@ -14,6 +14,7 @@ from urllib.parse import parse_qsl, urlsplit
 
 from research_modules import TZ, content_hash, load_module, module_path, stamp
 from research_store import read_json
+from sector_radar_commentary import describe_stock
 
 
 STRATEGY_NAMES = {'prelaunch': '启动前潜伏', 'yichujifa': '一触即发',
@@ -270,6 +271,10 @@ def build_daily_model(report, historical=False):
         review.pop(code, None)
     model.update(review=list(review.values()), observed=list(observed.values()), started=list(started.values()))
     model['counts'] = {key: len(model[key]) for key in ('review', 'observed', 'started')}
+    # Descriptive price/volume summaries only; never change native qualification.
+    for kind in ('review', 'observed', 'started'):
+        for row in model[kind]:
+            row['analysis'] = describe_stock(row, candidates.get(row['code'], {}).get('bars') or [], signal)
     return model
 
 

@@ -58,9 +58,6 @@ def row_reason(row, kind):
         return '、'.join(x['label'] for x in records(row.get('supporting_skills'))) + '支持收盘观察'
     if kind == 'started':
         return '已脱离本轮潜伏阶段，不列低位第一候选'
-    missing = texts(row.get('missing'))
-    if missing:
-        return '待补：' + '；'.join(x.split('：')[0] for x in missing[:2])
     return '；'.join(texts(row.get('reasons'))[:2]) or '原报告列为优先补证，尚未入选'
 
 
@@ -69,24 +66,21 @@ def row_card(row, kind, day, legacy_ids):
     token = f'{day}-{kind}-{key(code)}'
     groups = ' / '.join(str(x.get('label') or '') for x in records(row.get('groups')))
     failures = texts(row.get('failure_reasons'))
-    status = ('未入选 · 条件未满足' if failures else '未入选 · 待补证') if kind == 'review' else ('收盘观察 · 非买点' if kind == 'observed' else '跟踪，不追认潜伏资格')
+    status = ('未入选' if failures else '仅作观察') if kind == 'review' else ('收盘观察 · 非买点' if kind == 'observed' else '跟踪，不追认潜伏资格')
     if row.get('observation_origin') == 'prelaunch_core':
         status = '潜伏核心 · 非板块前三排名'
     if row.get('historical'):
         status = '历史 · ' + status
     levels = records(row.get('levels'))
     levels_text = ' · '.join(e(x.get('label')) + ' ' + number(x.get('value')) for x in levels[:3])
-    next_checks = texts(row.get('next_check'))
-    next_text = ('仅复核结构变化，不放宽原门槛。' if failures else next_checks[0] if next_checks else '等待新的完整证据，不据此直接交易。')
-    reason = row_reason(row, kind)
-    original = texts(row.get('reasons'))
-    missing = texts(row.get('missing'))
-    risks = texts(row.get('risks'))
-    more = ''
-    for title, values in (('原始依据', original), ('尚待核验', missing), ('后续确认', next_checks), ('失效与风险', risks)):
-        if values:
-            more += '<p><b>' + title + '</b> ' + '；'.join(e(x) for x in values) + '</p>'
-    more += '<p>' + links(row.get('sources')) + '</p>' if row.get('sources') else ''
+    analysis = row.get('analysis') if isinstance(row.get('analysis'), dict) else {}
+    verdict = analysis.get('verdict') or row_reason(row, kind)
+    paragraphs = ''.join('<p class="radar-stock-analysis"><b>' + label + '</b>' + e(analysis[field]) + '</p>'
+                         for field, label in (('price_volume', '价量'), ('watch', '关注'), ('risk', '风险'))
+                         if analysis.get(field))
+    limitation = '<small class="radar-stock-limitation">' + e(analysis['limitation']) + '</small>' if analysis.get('limitation') else ''
+    source_links = links((row.get('sources') or [])[:2])
+    more = '<details id="radar-note-' + token + '"><summary>数据来源</summary><p>' + source_links + '</p></details>' if source_links else ''
     legacy = ''
     if code not in legacy_ids and re.fullmatch(r'\d{6}', code):
         legacy = f'<span class="radar-anchor" id="radar-stock-{code}"></span>'
@@ -96,8 +90,8 @@ def row_card(row, kind, day, legacy_ids):
     return f'''<article class="radar-daily-row" data-radar-stock="{e(code)}">{legacy}
 <div class="radar-stock-name"><b>{e(row.get('name'))}</b><span>{e(code)} · {e(groups)}</span><small class="radar-row-status">{e(status)}</small></div>
 <div class="radar-close"><b>{number(row.get('price'))}</b><small>5日 {e(r5)} / 20日 {e(r20)}</small></div>
-<div class="radar-decision"><p>{e(reason)}</p><small>{levels_text or e(next_text)}</small>
-<details id="radar-note-{token}"><summary>核验要点与来源</summary>{more or '<p>该日没有保存更多证据。</p>'}</details></div></article>'''
+<div class="radar-decision"><p class="radar-verdict">{e(verdict)}</p>{paragraphs}
+{("<small>" + levels_text + "</small>") if not paragraphs and levels_text else ""}{limitation}{more}</div></article>'''
 
 
 def list_panel(model, kind, label, legacy_ids):
@@ -108,11 +102,11 @@ def list_panel(model, kind, label, legacy_ids):
              'started': '该日没有保存已启动跟踪标的。'}[kind]
     if kind == 'observed' and model.get('status') == 'empty':
         empty = '筛选完成，正式观察为空。'
-    hint = {'review': '低位形态优先看；以下尚未入选，先核对阻碍。',
+    hint = {'review': '低位形态观察，先看走势与突破条件。',
             'observed': '原策略完整支持的收盘观察，仍需后续确认。',
             'started': '已启动单列，不混入低位待启动候选。'}[kind]
     content = ''.join(row_card(row, kind, day, legacy_ids) for row in rows)
-    heading = '<div class="radar-column-head" aria-hidden="true"><span>标的 / 板块</span><span>收盘价 / 阶段涨幅</span><span>关键判断 / 结构位置</span></div>' if rows else ''
+    heading = '<div class="radar-column-head" aria-hidden="true"><span>标的 / 板块</span><span>收盘价 / 阶段涨幅</span><span>个股判断 / 后续关注</span></div>' if rows else ''
     return f'''<section id="radar-list-{day}-{kind}" data-radar-list="{kind}" role="tabpanel" aria-labelledby="radar-tab-{day}-{kind}" tabindex="0" {'hidden' if kind != 'review' else ''}>
 <p class="radar-list-hint">{e(hint)}</p>{heading}{content or '<p class="radar-empty">' + empty + '</p>'}</section>'''
 
@@ -121,13 +115,9 @@ def day_panel(model, selected, legacy_ids):
     day = model['signal_date']
     historical = model.get('historical', False)
     lists = ''.join(f'<button type="button" id="radar-tab-{day}-{kind}" role="tab" data-radar-list-tab="{kind}" aria-selected="{str(kind == "review").lower()}" aria-controls="radar-list-{day}-{kind}" tabindex="{0 if kind == "review" else -1}">{label}<span>{len(records(model.get(kind)))}</span></button>' for kind, label in LISTS)
-    coverage = model.get('coverage') or {}
-    verified = coverage.get('membership_verified')
-    expected = coverage.get('sectors_expected')
-    coverage_note = f'成分已核验 {verified}/{expected} 板块；' if isinstance(verified, int) and isinstance(expected, int) else ''
     state_note = STATE_NAMES.get(model.get('status'), '证据待补')
     if model.get('status') == 'partial':
-        state_note = coverage_note + '证据未齐，未入选标的仅供复核。'
+        state_note = '以下为量价分析，尚非完整筛选通过名单。'
     validity = '历史列表 · 不授予当前观察资格' if historical else '收盘研究 · 非即时买点'
     forward = records(model.get('forward'))
     forward_html = ''
@@ -167,4 +157,4 @@ def render_page(now=None):
 <header class="radar-heading"><div><span class="eyebrow">每日观察</span><h1>板块雷达</h1></div><p>先看低位复核，再看正式观察</p></header>
 {failure}<span id="radar-universe" class="radar-anchor"></span><span id="radar-prelaunch-focus" class="radar-anchor"></span>
 <div class="radar-date-tabs" role="tablist" aria-label="研究日期">{dates}</div>{body}
-<p class="radar-footnote">同股合并板块标签；优先复核是核验顺序，不是收益排名。仅展示已存研究日，完整证据留在本地。</p></div>'''
+<p class="radar-footnote">同股合并板块；分析不等于买入信号。</p></div>'''
