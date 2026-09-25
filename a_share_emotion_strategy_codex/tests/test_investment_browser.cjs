@@ -18,8 +18,9 @@ const panel = `<div data-module="three-step" data-module-until="2099-01-01T15:00
 <details id="fixture-a" data-candidate data-search="fiction-a" data-bucket="qualified"><summary>A <span class="candidate-state">Pass</span></summary>Fictional only</details>
 <details id="fixture-b" data-candidate data-search="fiction-b" data-bucket="pending"><summary>B <span class="candidate-state">Pending</span></summary>Fictional only</details>
 </div></div>`;
+const rules = '<a href="#strategy-event-timing">Event timing</a><article id="strategy-event-timing"><h2>Fictional research overlay</h2><details id="strategy-event-timing-rules"><summary>Rules and source</summary>Fictional rules only</details></article><article id="strategy-late-day">Fictional existing rules</article>';
 const html = '<!doctype html><style>[hidden]{display:none!important}</style>'+pages.map(p=>`<button data-page="${p}">${p}</button>`).join('')+
-  pages.map(p=>`<section class="page" id="page-${p}" hidden>${p==='three-step'?panel:p}</section>`).join('')+
+  pages.map(p=>`<section class="page" id="page-${p}" hidden>${p==='three-step'?panel:p==='strategy'?rules:p}</section>`).join('')+
   '<div id="update-state"></div><script>'+js+'</script>';
 let revision = 'one';
 const server = http.createServer((req,res)=>{
@@ -56,7 +57,14 @@ const server = http.createServer((req,res)=>{
     assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-radar');
     await page.locator('[data-page="three-step"]').click();
     assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-three-step');
+    await page.goto(`http://127.0.0.1:${server.address().port}/#strategy-event-timing`);
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-strategy');
+    assert.equal(await page.locator('#strategy-event-timing-rules').getAttribute('open'),null);
+    await page.locator('#strategy-event-timing-rules summary').click();
+    assert.notEqual(await page.locator('#strategy-event-timing-rules').getAttribute('open'),null);
+    await page.evaluate(()=>{location.hash='strategy-late-day';});
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-strategy');
     assert.deepEqual(errors,[]);
-    console.log('Offline browser: nine tabs, filtering, reload restoration and expiry passed.');
+    console.log('Offline browser: nine tabs, rule anchors, filtering, reload restoration and expiry passed.');
   } finally {if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

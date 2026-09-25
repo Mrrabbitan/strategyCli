@@ -1,0 +1,4 @@
+interface:
+  display_name: "事件与资金介入时机"
+  short_description: "研究节假日、政策、业绩与资金日历，区分提前观察、量价确认和兑现风险"
+  default_prompt: "使用 $a-share-event-timing 整理未来20个交易日的事件窗口，找出值得提前观察的方向，并用我的选股策略核验介入与失效条件。"

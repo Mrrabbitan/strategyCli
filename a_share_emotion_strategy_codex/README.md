@@ -100,6 +100,8 @@ python3 refresh_research.py --module yichujifa --input "$AUTOSTRATEGY_PRIVATE_RO
 
 五项策略规则登记在 [docs/playbooks/registry.json](docs/playbooks/registry.json)，各自完整说明见 [STRATEGY.md](STRATEGY.md)。五种策略均有独立结果页；尾盘隔夜已从时点报告移出，旧 `#topic-late-day` 和规则 `#strategy-late-day` 链接仍可定位。规则版本与研究结果分开记录；公开分数和阈值是研究假设，不是胜率或收益保证。合并持仓、自选与既有名单时，使用[三梯队复核流程](docs/playbooks/decision-review.md)，保持账户时点、研究顺序和各策略资格独立。
 
+[事件与资金介入时机](docs/playbooks/event-timing.md)是独立研究辅助，在“我的策略”通过`#strategy-event-timing`查看；技能发行包见[入口原文](docs/playbooks/event-timing-skill/SKILL.md)。它整理节日、政策、业绩、产业和资金日历，按需调用原五策略核验，不新增选股结果页或定时任务。安装时将发行包完整复制到本机技能目录的`a-share-event-timing`文件夹；复制后保持文件逐字一致。
+
 ### 尾盘隔夜：按需研究与授权的两阶段预观察
 
 用户授权的定时研究在北京时间14:00做初筛、14:20仅对当日冻结初筛池做精筛，休市跳过；不恢复其他暂停的任务，也不新增高频扫描服务。具体口径见[两阶段预观察](docs/playbooks/late-day-skill/references/scheduled-preview.md)。最多十只“突破潜质”是有证据的观察顺序，不是收益或概率排名；缺关键证据不进入正式前十，不足不补位。两个阶段都是14:30前的预观察，不改变原参与窗口。原始初筛、精筛与指纹分别保存在本地私有目录，次日不得按涨跌改写样本。

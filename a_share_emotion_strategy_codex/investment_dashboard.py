@@ -55,11 +55,29 @@ def research_status(strategy):
             'link': '#page-' + strategy}
 
 
+def render_research_overlay(play):
+    sid = e(play['id'])
+    steps = ''.join(f'<span>{e(x)}</span>' for x in play.get('steps', []))
+    conditions = ''.join(f'<li>{e(x)}</li>' for x in play.get('conditions', []))
+    doc = ROOT / 'docs/playbooks' / Path(play.get('doc_file', '')).name
+    text = doc.read_text(encoding='utf-8') if doc.is_file() and doc.suffix == '.md' else ''
+    source = play.get('source_url') or ''
+    source_label = e(play.get('source_label', '规则说明'))
+    link = f'<a href="{e(source)}" target="_blank" rel="noopener noreferrer">{source_label} ↗</a>' if source.startswith('https://') else source_label
+    fingerprint = f' · 内容指纹 {e(play["source_hash"][:12])}' if play.get('source_hash') else ''
+    return f'''<article class="playbook research-overlay" id="strategy-{sid}"><header><span class="eyebrow">研究辅助 · {e(play['version'])}</span><h2>{e(play['name'])}</h2><p>{e(play['summary'])}</p></header>
+<h3>研究阶段</h3><div class="strategy-steps">{steps}</div><h3>判断条件</h3><ul>{conditions}</ul>
+<details id="strategy-{sid}-rules"><summary>完整说明与来源</summary><pre class="full-rules">{e(text)}</pre><p class="muted">{link}{fingerprint}</p></details></article>'''
+
+
 def render_playbooks():
     registry = read_json(ROOT / 'docs/playbooks/registry.json', {})
     cards = []
     for play in registry.get('playbooks', []):
         sid = play['id']
+        if play.get('kind') == 'research-overlay':
+            cards.append(render_research_overlay(play))
+            continue
         if sid not in ('prelaunch', 'yichujifa', 'dragon', 'late-day', 'three-step'):
             continue
         state = research_status(sid)

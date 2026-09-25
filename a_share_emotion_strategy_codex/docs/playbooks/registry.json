@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_on": "2026-09-18",
+  "updated_on": "2026-09-25",
   "purpose": "公开可复用规则，不含账户或当前研究股票。",
   "playbooks": [
     {
@@ -273,6 +273,37 @@
         "vendor/model.json"
       ],
       "source_hash": "sha256:250f9c0c5fb88cb947c20b6402d5bfa68dffced2aeb9f4fd32b27d06768980fa"
+    },
+    {
+      "id": "event-timing",
+      "kind": "research-overlay",
+      "name": "事件与资金介入时机",
+      "version": "1.0.0",
+      "source_url": null,
+      "source_label": "独立事件研究Skill；官方机制来源与可调整研究默认值分开登记",
+      "doc_file": "docs/playbooks/event-timing.md",
+      "summary": "先查事件增量，再看板块与个股承接；介入仍由原Skill确认，不把节日、消息或大单当必涨信号。",
+      "steps": [
+        "日历预观察",
+        "事件与业务查证",
+        "量价及原Skill确认",
+        "兑现与失效复核"
+      ],
+      "conditions": [
+        "覆盖节假日、政策、业绩订单、产业供需、指数ETF、公司资本事件与盘面修复。",
+        "核验公开时间和可交易时间；事件发生不等于公司受益，龙虎榜和成交也不等于量化身份。",
+        "比较相对强度、广度、成交扩散、提前涨幅和最近压力；缺关键证据不升级，空观察有效。",
+        "适配原五种策略，名次、冻结池、时间门槛和风险退出保持独立；不新增监控或交易。"
+      ],
+      "source_hash_scope": [
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/event-catalog.md",
+        "references/screening.md",
+        "references/sources.md",
+        "references/validation.md"
+      ],
+      "source_hash": "sha256:a291e741b4586e42af826dcbaba7b20d5d087a5c81a4d94fcb850918799e624a"
     }
   ]
 }
