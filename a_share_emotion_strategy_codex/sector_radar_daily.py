@@ -155,11 +155,14 @@ def _merge(rows, row):
         current['status'] = '条件失败 · 尚未纳入观察'
 
 
-def _supporting(row, signal):
+def _supporting(row, signal, *, include_paused=False):
+    from strategy_policy import is_paused
     if row.get('state') != 'watch':
         return []
     support = []
     for sid, check in _mapping(row.get('strategy_checks')).items():
+        if not include_paused and is_paused(sid):
+            continue
         check = _mapping(check)
         at = stamp(check.get('as_of'))
         if (sid in STRATEGY_NAMES and check.get('status') == 'passed'
@@ -214,7 +217,7 @@ def build_daily_model(report, historical=False):
             continue
         for code in sector.get('top_codes') or []:
             radar = candidates.get(str(code), {})
-            support = _supporting(radar, signal)
+            support = _supporting(radar, signal, include_paused=historical)
             if not support:
                 continue
             item = _row(radar, radar, sector, 'observed', historical, signal)
@@ -227,7 +230,8 @@ def build_daily_model(report, historical=False):
                 item['sources'] += _sources(check.get('sources'))
                 item['risks'] += _texts(check.get('risks'))
             _merge(observed, item)
-    focus = _mapping(report.get('prelaunch_focus'))
+    from strategy_policy import is_paused
+    focus = _mapping(report.get('prelaunch_focus')) if historical or not is_paused('prelaunch') else {}
     if focus.get('signal_date') == signal and focus.get('status') != 'unavailable':
         started_codes = {str(entry.get('code')) for group in _records(focus.get('sectors'))
                          for entry in _records(group.get('started')) if _entry_day_matches(entry, signal)}
@@ -236,7 +240,7 @@ def build_daily_model(report, historical=False):
             for entry in _records(focus_sector.get('entries')):
                 code = str(entry.get('code'))
                 radar = candidates.get(code, {})
-                prelaunch = next((check for sid, check in _supporting(radar, signal) if sid == 'prelaunch'), None)
+                prelaunch = next((check for sid, check in _supporting(radar, signal, include_paused=historical) if sid == 'prelaunch'), None)
                 coverage = _mapping(sector.get('coverage'))
                 # Saved native core status is a separate original observation,
                 # not a newly promoted sector top-three slot. Preserve it, but
@@ -352,7 +356,10 @@ def load_daily_reports(now=None, limit=20):
     for signal in selected:
         report = by_day[signal][1]
         expiry = stamp(report.get('valid_until'))
-        historical = signal != newest or expiry is None or expiry < now or attempt.get('status') == 'unavailable'
+        from strategy_policy import policy_fingerprint
+        current_policy = policy_fingerprint()
+        historical = (signal != newest or expiry is None or expiry < now or attempt.get('status') == 'unavailable'
+                      or (current_policy is not None and report.get('strategy_policy_fingerprint') != current_policy))
         models.append(build_daily_model(report, historical=historical))
     state = models[0]['status'] if models else 'not_run'
     if models and models[0]['historical']:

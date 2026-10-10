@@ -304,6 +304,66 @@
         "references/validation.md"
       ],
       "source_hash": "sha256:a291e741b4586e42af826dcbaba7b20d5d087a5c81a4d94fcb850918799e624a"
+    },
+    {
+      "id": "macd",
+      "kind": "research-overlay",
+      "name": "MACD完成日线参照",
+      "version": "1.0.0",
+      "source_url": null,
+      "source_label": "常用12/26/9研究默认值；不代表既有收益系统",
+      "doc_file": "docs/playbooks/macd.md",
+      "summary": "只核验完成日线动能；不能单凭金叉识别资金或决定买卖。",
+      "steps": [
+        "同源完成日K",
+        "12/26/9计算",
+        "零轴与柱变化",
+        "价格及风险复核"
+      ],
+      "conditions": [
+        "至少130根真实完成日K，保留复权、初始化、源时间和指纹。",
+        "零轴上DIF≥DEA且柱值>0支持动能，零轴下金叉仅恢复线索。",
+        "结构及主线失败优先，不等死叉；不引用已暂停策略评分。"
+      ],
+      "source_hash_scope": [
+        "macd.md"
+      ],
+      "source_hash": "sha256:3c5e13e55c566c37d18038073fb7297cb26b1f2985f3ba1a61fedbafac8b6800",
+      "result_anchor": "#page-reports"
+    },
+    {
+      "id": "catch-up-dragon",
+      "kind": "research-overlay",
+      "name": "主线扩散补涨龙",
+      "version": "1.0.0",
+      "source_url": null,
+      "source_label": "独立Skill原文；可调研究默认值，未经收益验证",
+      "doc_file": "docs/playbooks/catch-up-dragon.md",
+      "summary": "龙头买不到时，等待同主线跟随股自身转强；不因涨幅落后而被迫买入。",
+      "steps": [
+        "市场与主线",
+        "主营及未加速",
+        "MACD动能",
+        "突破后的承接",
+        "失效先退出"
+      ],
+      "conditions": [
+        "龙头仍强，至少两只直接相关股扩散；同标签不能替代主营和催化。",
+        "冻结T0同区间比较，不移动起点制造补涨空间。",
+        "完成日线MACD独立复核，收盘观察不等于盘中可参与。",
+        "10日确认线突破后两根完整5分钟站稳，第二根最低不破线。",
+        "量能同口径、报价同刻；缺资料等待，涨停买不到不虚构成交。",
+        "新买入T+1；主线或结构失效优先，不等MACD死叉。"
+      ],
+      "source_hash_scope": [
+        "SKILL.md",
+        "agents/openai.yaml",
+        "references/rules.md",
+        "references/data.md",
+        "scripts/analyze.py"
+      ],
+      "source_hash": "sha256:3e11771e518402f912c63b27cd235933c3aea8e43fd21b5f4cff5fd29d083f2e",
+      "result_anchor": "#page-reports"
     }
   ]
 }

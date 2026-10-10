@@ -56,6 +56,8 @@ def research_status(strategy):
 
 
 def render_research_overlay(play):
+    from strategy_policy import policy_status
+    policy = policy_status(play['id'])
     sid = e(play['id'])
     steps = ''.join(f'<span>{e(x)}</span>' for x in play.get('steps', []))
     conditions = ''.join(f'<li>{e(x)}</li>' for x in play.get('conditions', []))
@@ -65,20 +67,32 @@ def render_research_overlay(play):
     source_label = e(play.get('source_label', '规则说明'))
     link = f'<a href="{e(source)}" target="_blank" rel="noopener noreferrer">{source_label} ↗</a>' if source.startswith('https://') else source_label
     fingerprint = f' · 内容指纹 {e(play["source_hash"][:12])}' if play.get('source_hash') else ''
+    if policy['state'] == 'paused':
+        return f'''<article class="playbook research-overlay" id="strategy-{sid}"><header><span class="eyebrow">已暂停 · {e(play['version'])}</span><h2>{e(play['name'])}</h2><p>{e(policy['reason'])}</p></header><details id="strategy-{sid}-rules"><summary>保留的历史规则与来源</summary><pre class="full-rules">{e(text)}</pre><p class="muted">{link}{fingerprint}</p></details></article>'''
+    result = play.get('result_anchor')
+    result_link = f'<a href="{e(result)}">查看研究结果 ↗</a>' if isinstance(result, str) and result.startswith('#') else ''
     return f'''<article class="playbook research-overlay" id="strategy-{sid}"><header><span class="eyebrow">研究辅助 · {e(play['version'])}</span><h2>{e(play['name'])}</h2><p>{e(play['summary'])}</p></header>
 <h3>研究阶段</h3><div class="strategy-steps">{steps}</div><h3>判断条件</h3><ul>{conditions}</ul>
-<details id="strategy-{sid}-rules"><summary>完整说明与来源</summary><pre class="full-rules">{e(text)}</pre><p class="muted">{link}{fingerprint}</p></details></article>'''
+{result_link}<details id="strategy-{sid}-rules"><summary>完整说明与来源</summary><pre class="full-rules">{e(text)}</pre><p class="muted">{link}{fingerprint}</p></details></article>'''
 
 
 def render_playbooks():
+    from strategy_policy import policy_status
     registry = read_json(ROOT / 'docs/playbooks/registry.json', {})
     cards = []
-    for play in registry.get('playbooks', []):
+    plays = sorted(registry.get('playbooks', []), key=lambda p: policy_status(p['id'])['state'] == 'paused')
+    for play in plays:
         sid = play['id']
         if play.get('kind') == 'research-overlay':
             cards.append(render_research_overlay(play))
             continue
         if sid not in ('prelaunch', 'yichujifa', 'dragon', 'late-day', 'three-step'):
+            continue
+        policy = policy_status(sid)
+        if policy['state'] == 'paused':
+            doc = ROOT / 'docs/playbooks' / Path(play.get('doc_file', '')).name
+            text = doc.read_text(encoding='utf-8') if doc.is_file() and doc.suffix == '.md' else ''
+            cards.append(f'''<article class="playbook" id="strategy-{e(sid)}"><header><span class="eyebrow">已暂停 · {e(play['version'])}</span><h2>{e(play['name'])}</h2><p>{e(policy['reason'])}</p></header><details><summary>保留的历史规则（不参与当前选股）</summary><pre class="full-rules">{e(text)}</pre></details><p class="muted">{e(play.get('source_label', '规则原文'))} · 内容指纹 {e(play.get('source_hash', '')[:12])}</p></article>''')
             continue
         state = research_status(sid)
         facts = ''.join(f'<li>{e(x)}</li>' for x in play.get('conditions', []))
@@ -100,7 +114,7 @@ def render_playbooks():
     return ''.join(cards) or '<p class="notice">规则资料缺失，请检查安装；不依赖账户或候选文件。</p>'
 
 
-def render_dashboard(report_date=None, report=None, slots=None, alerts='', **_compat):
+def render_dashboard(report_date=None, report=None, slots=None, alerts='', policy_pages=None, **_compat):
     from research_views import render_module
     from fed_research import render_fed_research
     from research_topics import render_topics, render_topic_links
@@ -108,14 +122,16 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', **_co
     from three_step_views import render_page as render_three_step
     from sector_radar_views import render_page as render_sector_radar
     report_date = report_date or latest_report_date()
+    policy_pages = policy_pages or {}
     data = {'reports': verified_reports(report_date, slots), 'report_date': str(report_date)}
     values = {
         '@@HOT_SECTORS@@': render_module('hot'), '@@DRAGON@@': render_module('dragon'),
-        '@@YICHUJIFA@@': render_module('yichujifa'), '@@PRELAUNCH@@': render_module('prelaunch'),
+        '@@YICHUJIFA@@': policy_pages['yichujifa'] if 'yichujifa' in policy_pages else render_module('yichujifa'),
+        '@@PRELAUNCH@@': policy_pages['prelaunch'] if 'prelaunch' in policy_pages else render_module('prelaunch'),
         '@@FED_RESEARCH@@': render_fed_research(), '@@PLAYBOOKS@@': render_playbooks(),
         '@@RESEARCH_TOPICS@@': render_topics(exclude=('late-day',)),
-        '@@LATE_DAY@@': render_late_day(),
-        '@@THREE_STEP@@': render_three_step(),
+        '@@LATE_DAY@@': policy_pages['late-day'] if 'late-day' in policy_pages else render_late_day(),
+        '@@THREE_STEP@@': policy_pages['three-step'] if 'three-step' in policy_pages else render_three_step(),
         '@@SECTOR_RADAR@@': render_sector_radar(),
         '@@HOT_TOPICS@@': render_topic_links('hot'),
         '@@DRAGON_TOPICS@@': render_topic_links('dragon'),

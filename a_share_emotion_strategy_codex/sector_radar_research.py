@@ -107,8 +107,13 @@ def history(stock, days, signal, *, benchmark=False, now=None):
 
 def checked_cells(cells, signal, now):
     """A claimed native pass needs its own dated provenance, not a joined flag."""
+    from strategy_policy import is_paused, policy_status
     result = {}
     for key in SKILLS:
+        if is_paused(key):
+            result[key] = {'status': 'paused', 'observation_passed': False,
+                           'reasons': [policy_status(key)['reason']]}
+            continue
         cell = dict(cells.get(key) or {'status':'not_run','observation_passed':False,'reasons':['尚未执行此策略']})
         if cell.get('status') == 'passed' or cell.get('observation_passed') is True:
             date = str(cell.get('as_of') or '')
@@ -270,10 +275,10 @@ def evaluate(data, checks, now, *, catalog=None):
     # A missing strategy can hide passing stocks only when no other skill has
     # already proved the disjunction. Never turn an unknown OR into a failure.
     relevant=[c for c in candidates if states.get(c)!='excluded']
-    matrix_complete=all(all(cell.get('status') in ('passed','failed','not_applicable') for cell in candidates[c]['strategy_checks'].values())
+    matrix_complete=all(all(cell.get('status') in ('passed','failed','not_applicable','paused') for cell in candidates[c]['strategy_checks'].values())
                         and len(candidates[c]['strategy_checks'])==5 for c in relevant)
     observation_complete=all(bool(candidates[c].get('supporting_skills')) or
-        all(cell.get('status') in ('failed','not_applicable') for cell in candidates[c]['strategy_checks'].values())
+        all(cell.get('status') in ('failed','not_applicable','paused') for cell in candidates[c]['strategy_checks'].values())
         for c in relevant)
     announcement_complete=all(candidates[c].get('announcement_verified') for c in relevant)
     forward_ready=(bool(sectors) and bool(benchmark) and observation_complete and
@@ -312,8 +317,10 @@ def evaluate(data, checks, now, *, catalog=None):
                         'forward_ready':forward_ready},
             'missing':list(dict.fromkeys(missing)),'sectors':sectors,'candidates':list(candidates.values()),'forward_top':forward,
             'executions':checks.get('executions',[]),'sources':data.get('sources',[]),'acquisition':data.get('acquisition',{}),
+            'strategy_policy_fingerprint': checks.get('strategy_policy_fingerprint'),
             'changes':[],'actionable':False,'research_only':True}
-    if checks.get('prelaunch_focus_input'):
+    from strategy_policy import is_paused
+    if checks.get('prelaunch_focus_input') and not is_paused('prelaunch'):
         from sector_radar_focus import build_prelaunch_focus
         report['prelaunch_focus'] = build_prelaunch_focus(report, checks['prelaunch_focus_input'])
     return report

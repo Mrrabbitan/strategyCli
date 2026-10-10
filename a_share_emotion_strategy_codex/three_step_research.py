@@ -167,6 +167,8 @@ def collect(at, signal, calendar, *, feed=None):
 
 
 def research(now, *, phase='auto', input_data=None):
+    from strategy_policy import require_enabled
+    require_enabled('three-step')
     signal,calendar=calendar_payload(now)
     if input_data is None:
         latest,_=calendar_payload(dt.datetime.now(TZ))

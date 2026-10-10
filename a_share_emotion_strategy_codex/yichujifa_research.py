@@ -311,6 +311,8 @@ def _import_native(report, evidence=None, live=None, snapshots=None, as_of=None)
 
 def import_native(report, evidence=None, live=None, snapshots=None, as_of=None):
     """Fail closed on malformed optional fields instead of publishing an empty success."""
+    from strategy_policy import require_enabled
+    require_enabled('yichujifa')
     try:
         return _import_native(report, evidence, live, snapshots, as_of)
     except (AttributeError, ValueError, TypeError, KeyError, OSError):
@@ -320,6 +322,8 @@ def import_native(report, evidence=None, live=None, snapshots=None, as_of=None):
 def research(as_of: dt.datetime, phase: str = 'prepare', input_data: dict | None = None,
              live_data: dict | None = None) -> dict:
     """Run the installed skill, or adapt supplied dictionaries without network I/O."""
+    from strategy_policy import require_enabled
+    require_enabled('yichujifa')
     now = _stamp(as_of) or dt.datetime.now(TZ)
     if input_data is not None:
         if not isinstance(input_data, dict):

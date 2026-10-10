@@ -11,6 +11,7 @@ from market_calendar import is_trading_day
 from research_modules import TZ, FOLDERS, stamp, load_module, publish, record_failure
 from build_investment_site import build
 from research_store import private_path
+from strategy_policy import is_paused, require_enabled, paused_outcome, StrategyPausedError
 
 # Preserve existing scheduled tasks. New on-demand strategies require an
 # explicit module selection and must not silently expand historical `all`.
@@ -42,6 +43,7 @@ def _read_input(path, *, frames=False):
 
 
 def run_module(module, now, phase, *, input_data=None, hot=None):
+    require_enabled(module)
     if module == 'sector-radar':
         from sector_radar_research import research
         return research(now, phase=phase, input_data=input_data)
@@ -111,9 +113,14 @@ def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True)
         return outcome
 
     def execute(module, supplied=None, hot_data=None):
+        if is_paused(module):
+            return paused_outcome(module), None
         try:
             data = run_module(module, now, phase, input_data=supplied, hot=hot_data)
             return deliver(module, data), data
+        except StrategyPausedError:
+            # A changed policy must not replace the last historical report.
+            return paused_outcome(module), None
         except Exception as exc:
             # Detailed raw runs stay private; no path/credential-bearing exception
             # messages are returned to the page or automation report.
@@ -133,6 +140,9 @@ def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True)
             outcome, hot_data = execute('hot', input_data)
             local.append(outcome)
         if 'dragon' in requested:
+            if is_paused('dragon'):
+                local.append(paused_outcome('dragon'))
+                return local
             # If explicitly running only dragon, its adapter obtains/validates a
             # matching hot context. A failed hot refresh is never silently hidden.
             if 'hot' in requested and (not hot_data or hot_data.get('status') == 'unavailable'):
@@ -186,7 +196,8 @@ def main():
     result = refresh(modules, as_of=when, phase=args.phase,
                      input_data=input_data, rebuild=not args.no_build)
     print(json.dumps(result, ensure_ascii=False))
-    return 2 if any(x['status'] == 'unavailable' or x.get('page_status') == 'failed' for x in result['modules']) else 0
+    return 2 if any(x['status'] == 'unavailable' or x.get('page_status') == 'failed'
+                    or (args.module != 'all' and x['status'] == 'paused') for x in result['modules']) else 0
 
 
 if __name__ == '__main__':

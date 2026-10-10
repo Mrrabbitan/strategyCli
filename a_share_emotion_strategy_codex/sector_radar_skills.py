@@ -19,6 +19,7 @@ from zoneinfo import ZoneInfo
 from urllib.parse import urlsplit
 
 from research_store import atomic_json, read_json, research_path, update_lock, load_config
+from strategy_policy import is_paused, require_enabled, policy_status, policy_fingerprint, StrategyPausedError
 
 TZ = ZoneInfo('Asia/Shanghai')
 MODULES = ('prelaunch', 'yichujifa', 'dragon', 'late-day', 'three-step')
@@ -86,7 +87,9 @@ def _cell(module, status='pending', *, report=None, row=None, reasons=None, pass
     rule = report.get('rules') or {}
     version = report.get('rule_version') or rule.get('version')
     rule_hash = report.get('rule_hash') or rule.get('source_hash')
-    if not version or not rule_hash:
+    if status == 'paused':
+        version, rule_hash = '已暂停', None
+    elif not version or not rule_hash:
         try:
             version, rule_hash = _rule(module)
         except (OSError, ValueError, KeyError, SyntaxError):
@@ -165,6 +168,7 @@ def _prelaunch_input(stocks, signal, supplied):
 
 
 def _run_prelaunch(at, signal, stocks, calendar, supplied, refresh, folder):
+    require_enabled('prelaunch')
     import prelaunch_research as native
     data = copy.deepcopy(supplied.get('prelaunch')) if supplied.get('prelaunch') is not None else _prelaunch_input(stocks, signal, supplied)
     _require_date(data, signal)
@@ -188,6 +192,7 @@ def _run_prelaunch(at, signal, stocks, calendar, supplied, refresh, folder):
 
 
 def _run_yichujifa(at, signal, stocks, calendar, supplied, refresh, folder):
+    require_enabled('yichujifa')
     """Native scan also revalidates pool metadata/limits for imported inputs."""
     import yichujifa_research as native
     if supplied.get('yichujifa') is None and not refresh:
@@ -300,6 +305,7 @@ def _run_dragon(at, signal, stocks, calendar, supplied, refresh, folder):
 
 
 def _run_three_step(at, signal, stocks, calendar, supplied, refresh, folder):
+    require_enabled('three-step')
     import three_step_research as native
     native_signal, native_calendar = native.calendar_payload(at)
     if native_signal != signal:
@@ -338,6 +344,7 @@ def _late_inputs(signal, at):
 
 
 def _run_late_day(at, signal, stocks, calendar, supplied, refresh, folder):
+    require_enabled('late-day')
     import late_day_research as native
     data_items = supplied.get('late-day')
     data_items = _list(data_items) if data_items is not None else _late_inputs(signal, at)
@@ -516,7 +523,8 @@ def run_checks(as_of, signal_date, stocks, calendar, *, refresh_native=True, sup
         raise ValueError('Radar stock identifiers must be unique before native checks')
     run_id = dt.datetime.now(TZ).strftime('%Y%m%dT%H%M%S%f')
     root = research_path('sector_radar/native/runs') / run_id
-    result = {'by_code': {c: {} for c in codes}, 'executions': [], 'missing': []}
+    result = {'by_code': {c: {} for c in codes}, 'executions': [], 'missing': [],
+              'strategy_policy_fingerprint': policy_fingerprint()}
     def scope_failure(stock):
         code = stock['code']
         if len(code) != 6 or not code.isdigit() or not code.startswith(('000','001','002','003','600','601','603','605')):
@@ -533,7 +541,15 @@ def run_checks(as_of, signal_date, stocks, calendar, *, refresh_native=True, sup
         folder = root / module
         began = dt.datetime.now(TZ).isoformat()
         focus_input = None
+        if is_paused(module):
+            reason = policy_status(module)['reason']
+            cells = {c: _cell(module, 'paused', reasons=[reason]) for c in codes}
+            execution = {'module': module, 'strategy': module, 'status': 'paused',
+                         'started_at': began, 'finished_at': began, 'as_of': None,
+                         'missing': [], 'reason': reason, 'actionable': False}
+            return module, cells, execution, None
         try:
+            require_enabled(module)
             report = RUNNERS[module](at, signal, stocks, calendar, supplied, refresh_native, folder)
             if module == 'prelaunch':
                 focus_input = report
@@ -549,6 +565,13 @@ def run_checks(as_of, signal_date, stocks, calendar, *, refresh_native=True, sup
                          'as_of': report.get('as_of'), 'input_fingerprint': report.get('input_fingerprint'),
                          'coverage': report.get('coverage') or {}, 'missing': report.get('missing') or [],
                          'actionable': False}
+        except StrategyPausedError:
+            reason = policy_status(module)['reason']
+            cells = {c: _cell(module, 'paused', reasons=[reason]) for c in codes}
+            execution = {'module': module, 'strategy': module, 'status': 'paused',
+                         'started_at': began, 'finished_at': dt.datetime.now(TZ).isoformat(),
+                         'as_of': None, 'missing': [], 'reason': reason, 'actionable': False}
+            return module, cells, execution, None
         except Exception as exc:
             focus_input = None
             issue = ('本次未执行：' if isinstance(exc, LookupError) else '原生证据执行受阻：') + str(exc)

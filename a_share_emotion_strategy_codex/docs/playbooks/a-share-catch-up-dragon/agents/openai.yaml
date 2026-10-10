@@ -1,0 +1,4 @@
+interface:
+  display_name: "主线扩散补涨龙"
+  short_description: "核验热门主线扩散与未加速跟随股，结合日线MACD和突破承接判断补涨机会"
+  default_prompt: "使用 $a-share-catch-up-dragon 研究当前主线的补涨机会，核验主营关联、龙头健康、完成日线MACD及盘中突破承接，给出观察、确认和风险。"

@@ -520,6 +520,8 @@ def _intraday(now, previous, input_data):
 
 def research(as_of: dt.datetime, phase: str = 'prepare', input_data: dict = None,
              enrichment: dict = None, previous: dict = None) -> dict:
+    from strategy_policy import require_enabled
+    require_enabled('prelaunch')
     now = as_of.astimezone(TZ) if as_of.tzinfo else as_of.replace(tzinfo=TZ)
     if phase == 'intraday':
         return _intraday(now, previous, input_data)
@@ -715,6 +717,8 @@ def collect(as_of, max_stocks=240, workers=6, raw_directory=None):
     Industry breadth and announcement evidence remain missing, never estimated
     from this sampled universe. Latest quote timestamps cannot date old bars.
     """
+    from strategy_policy import require_enabled
+    require_enabled('prelaunch')
     day = signal_day(as_of)
     feed = PublicFeed(raw_directory=raw_directory)
     data = {'signal_date': day, 'stocks': [], 'benchmark': {}, 'market': {}, 'industries': {},
@@ -804,6 +808,8 @@ def main():
     parser.add_argument('--output-dir', type=Path, required=True, help='私有任务目录；不直接发布工作台')
     parser.add_argument('--max-stocks', type=int, default=240)
     args = parser.parse_args()
+    from strategy_policy import require_enabled
+    require_enabled('prelaunch')
     now = dt.datetime.fromisoformat(args.as_of) if args.as_of else dt.datetime.now(TZ)
     args.output_dir.mkdir(parents=True, exist_ok=True)
     load = lambda p: json.loads(p.read_text(encoding='utf-8')) if p else None

@@ -10,13 +10,104 @@ from pathlib import Path
 import re
 import shutil
 import tempfile
+from html.parser import HTMLParser
 from zoneinfo import ZoneInfo
 from investment_dashboard import ROOT, render_dashboard, verified_reports, latest_report_date, SLOT_LABELS
 from research_store import private_path, research_path, read_json, atomic_json, update_lock
 from fed_research import SNAPSHOT as FED_SNAPSHOT, ASSET_PREFIX
+from strategy_policy import is_paused, policy_status
 
 SLOTS = {k: '' for k in SLOT_LABELS}
 TZ = ZoneInfo('Asia/Shanghai')
+PAUSABLE_PAGES = ('prelaunch', 'yichujifa', 'late-day', 'three-step')
+
+
+class _PageSections(HTMLParser):
+    """Locate complete outer pages without confusing nested research sections."""
+    def __init__(self, page):
+        super().__init__(convert_charrefs=False)
+        self.page = page
+        self.lines = [0]
+        self.lines += [match.end() for match in re.finditer('\n', page)]
+        self.stack, self.sections, self.anchors = [], {}, []
+
+    def absolute_position(self):
+        line, col = self.getpos()
+        return self.lines[line - 1] + col
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if attributes.get('id'):
+            self.anchors.append((self.absolute_position(), attributes['id']))
+        if tag == 'section':
+            self.stack.append((attributes.get('id'), self.absolute_position(), self.absolute_position() + len(self.get_starttag_text())))
+
+    def handle_endtag(self, tag):
+        if tag == 'section' and self.stack:
+            name, start, inner = self.stack.pop()
+            if name in {'page-' + module for module in PAUSABLE_PAGES}:
+                self.sections[name] = (start, inner, self.absolute_position())
+
+
+def _paused_page(module, anchors):
+    """Summarize saved evidence as history; suppress every current pass label."""
+    e = lambda value: html.escape(str(value or ''), quote=True)
+    labels = {'prelaunch': '启动前潜伏', 'yichujifa': '一触即发',
+              'late-day': '尾盘隔夜', 'three-step': '三步选股'}
+    if module == 'late-day':
+        topic = read_json(research_path('topics/late-day/current.json'), {})
+        data = topic.get('late_day_result') or {} if isinstance(topic, dict) else {}
+        data = data if isinstance(data, dict) else {}
+        cutoff = data.get('as_of') or (topic.get('as_of') if isinstance(topic, dict) else None)
+        rows = data.get('rows') or []
+    else:
+        from research_modules import load_module
+        data = load_module(module)['data']
+        cutoff = data.get('as_of')
+        rows = data.get('candidates') or data.get('rows') or []
+    rows = [row for row in rows if isinstance(row, dict)] if isinstance(rows, list) else []
+    anchors = list(anchors)
+    anchors += {
+        'prelaunch': ['prelaunch-selection', 'prelaunch-pools', 'prelaunch-sector-evidence']
+                     + ['prelaunch-pool-' + name for name in ('core', 'watch', 'started', 'invalid')],
+        'yichujifa': ['yichujifa-selection', 'yichujifa-sector-evidence'],
+        'late-day': ['topic-late-day', 'late-day-schedule'],
+        'three-step': ['three-step-collection', 'three-step-other-records'],
+    }[module]
+    if module in ('prelaunch', 'yichujifa'):
+        anchors += ['missing-' + module, 'sources-' + module]
+        for index, row in enumerate(rows):
+            identity = '|'.join((module, str(row.get('group')), str(row.get('sector') or row.get('theme') or ''),
+                                 str(row.get('code', '')) or str(index)))
+            anchors.append('candidate-' + hashlib.sha256(identity.encode()).hexdigest()[:14])
+    elif module == 'late-day':
+        anchors += [prefix + str(row.get('code', '')) for row in rows for prefix in ('late-day-stock-', 'late-day-source-')]
+    else:
+        anchors += ['three-step-' + str(row.get('code', '')) for row in rows]
+    historical = ''.join('<li>' + e(row.get('name')) + ' ' + e(row.get('code')) + '</li>' for row in rows)
+    old_anchors = ''.join(f'<span id="{e(anchor)}" class="radar-anchor"></span>' for anchor in dict.fromkeys(anchors))
+    return f'''<div class="research-surface" data-strategy-paused="{e(module)}"><div class="research-heading"><div><span class="eyebrow">研究选择</span><h1>{labels[module]}</h1></div><div class="research-status"><b>已暂停</b></div></div>
+<aside class="notice" role="status"><p>{e(policy_status(module)['reason'])}</p><p>暂停选股运行与参考；旧记录保留，不取得当前资格。</p><a href="#strategy-{e(module)}">查看原规则与暂停状态</a></aside>
+<details class="paused-history"><summary>历史研究 · {len(rows)} 条记录</summary>{old_anchors}<p>原行情时点 {e(cutoff) or '未提供'}。按当时资料存档，不作为本轮候选。</p><ul>{historical or '<li>尚无可展示的历史记录。</li>'}</ul><p>完整来源、冻结锚点与原始结果仍保存在本地私有档案。</p></details></div>'''
+
+
+def apply_strategy_policy(page):
+    paused = [module for module in PAUSABLE_PAGES if is_paused(module)]
+    if not paused:
+        return page
+    parser = _PageSections(page)
+    parser.feed(page)
+    changes = []
+    for module in paused:
+        boundary = parser.sections.get('page-' + module)
+        if boundary is None:
+            raise ValueError('A paused strategy page is missing')
+        _, begin, end = boundary
+        anchors = [name for position, name in parser.anchors if begin <= position < end]
+        changes.append((begin, end, _paused_page(module, anchors)))
+    for begin, end, content in sorted(changes, reverse=True):
+        page = page[:begin] + content + page[end:]
+    return page
 
 
 def report_html(day, slot, payload):
@@ -71,7 +162,8 @@ def build(day=None, *, output=None, update_local=True):
     with update_lock():
         stage=Path(tempfile.mkdtemp(prefix='.workbench-build-',dir=out.parent))
         try:
-            rendered=render_dashboard(day, slots=SLOTS)
+            policy_pages = {module: '' for module in PAUSABLE_PAGES if is_paused(module)}
+            rendered=apply_strategy_policy(render_dashboard(day, slots=SLOTS, policy_pages=policy_pages))
             (stage/'index.html').write_text(rendered,encoding='utf-8')
             (stage/'latest.html').write_text(rendered,encoding='utf-8')
             (stage/'robots.txt').write_text('User-agent: *\nDisallow: /\n')

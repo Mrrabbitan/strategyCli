@@ -74,6 +74,9 @@ def validate(data, now):
     cutoff, generated, expiry = (stamp(data.get(k)) for k in ('as_of', 'generated_at', 'valid_until'))
     if not cutoff or not generated or not expiry or not cutoff <= generated <= now or expiry < cutoff:
         raise ValueError('Invalid topic clocks')
+    information = stamp(data.get('information_as_of'))
+    if 'information_as_of' in data and (not information or not cutoff <= information <= generated):
+        raise ValueError('Invalid topic information cutoff')
     if data.get('status') not in ('complete', 'partial', 'unavailable'):
         raise ValueError('Invalid topic status')
     if data.get('related_module') not in (None, *RELATED_MODULES):
@@ -263,9 +266,11 @@ def render_topics(*, now=None, exclude=()):
         changes = ''.join(f'<li>{escape(x)}</li>' for x in data['changes'])
         missing = ''.join(f'<li>{escape(x)}</li>' for x in data['missing'])
         sources = _source_links(data.get('sources', []))
+        information = (f' · 资料核验截至 {escape(data["information_as_of"])}（盘后资料不倒填行情判断）'
+                       if data.get('information_as_of') else '')
         sections.append(f'''<section class="playbook" id="topic-{escape(data['topic_id'])}">
 <h2>{escape(data['title'])}</h2><p class="notice">{state}。静态专题不授予交易资格。</p>
-<p>行情截止 {escape(data['as_of'])} · 本次计算 {escape(data['generated_at'])} · 观察期限 {escape(data['valid_until'])}</p>
+<p>行情截止 {escape(data['as_of'])}{information} · 本次计算 {escape(data['generated_at'])} · 观察期限 {escape(data['valid_until'])}</p>
 <p>{escape(data['summary'])}</p><h3>相较上次的变化</h3><ul>{changes}</ul>
 {_render_decision_tiers(data)}
 <div style="overflow-x:auto"><table><thead><tr><th>方向</th><th>产业状态</th><th>市场状态</th><th>依据</th><th>反证与缺口</th><th>下一步</th></tr></thead><tbody>{rows}</tbody></table></div>

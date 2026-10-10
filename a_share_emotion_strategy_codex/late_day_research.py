@@ -121,6 +121,8 @@ def topic_payload(report):
 
 
 def publish_report(report, *, rebuild=True):
+    from strategy_policy import require_enabled
+    require_enabled('late-day')
     from research_topics import publish_topic
     folder=research_path('late_day')
     with update_lock():
@@ -141,6 +143,8 @@ def publish_report(report, *, rebuild=True):
 
 
 def run_research(data=None, *, as_of=None, phase='auto', now=None, rebuild=True):
+    from strategy_policy import require_enabled
+    require_enabled('late-day')
     now=now or dt.datetime.now(TZ)
     at=as_of or now
     try:
@@ -378,6 +382,8 @@ def main():
     a=p.parse_args()
     if a.install_skill:
         print(install_skill());return
+    from strategy_policy import require_enabled
+    require_enabled('late-day')
     if a.input and a.collect: p.error('选择导入或采集之一')
     at=a.as_of or dt.datetime.now(TZ)
     if at.tzinfo is None: p.error('分析时点须带时区')

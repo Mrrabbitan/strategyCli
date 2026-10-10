@@ -7,6 +7,7 @@ import json
 from zoneinfo import ZoneInfo
 
 from research_store import research_path, read_json, atomic_json, update_lock
+from strategy_policy import is_paused, require_enabled
 
 TZ = ZoneInfo('Asia/Shanghai')
 FOLDERS = {'hot': 'hot_sectors', 'dragon': 'dragon', 'yichujifa': 'yichujifa', 'prelaunch': 'prelaunch', 'three-step':'three_step', 'sector-radar':'sector_radar'}
@@ -81,6 +82,8 @@ def load_module(module, now=None):
 def eligible_now(module, row, data, now=None):
     """A positive label is a claim with its own evidence lifetime, not a bool."""
     now = now or dt.datetime.now(TZ)
+    if is_paused(module):
+        return False
     if row.get('eligible') is not True:
         return False
     if module == 'prelaunch':
@@ -117,6 +120,7 @@ def eligible_now(module, row, data, now=None):
 
 def publish(module, data, *, attempted_at=None):
     """One module transaction. Call the site builder only after releasing this lock."""
+    require_enabled(module)
     attempted_at = attempted_at or dt.datetime.now(TZ)
     if not isinstance(data, dict) or data.get('module_id') != module:
         raise ValueError('Research module mismatch')
