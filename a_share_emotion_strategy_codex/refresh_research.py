@@ -42,8 +42,11 @@ def _read_input(path, *, frames=False):
     return data
 
 
-def run_module(module, now, phase, *, input_data=None, hot=None):
+def run_module(module, now, phase, *, input_data=None, hot=None, scheduled=False):
     require_enabled(module)
+    if module == 'night-radar':
+        from night_radar import research
+        return research(now, phase=phase, input_data=input_data, scheduled=scheduled)
     if module == 'sector-radar':
         from sector_radar_research import research
         return research(now, phase=phase, input_data=input_data)
@@ -79,7 +82,7 @@ def run_module(module, now, phase, *, input_data=None, hot=None):
     raise ValueError('Unknown module')
 
 
-def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True):
+def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True, night_scheduled=False):
     now = as_of or dt.datetime.now(TZ)
     started = dt.datetime.now(TZ)
     if now.tzinfo is None:
@@ -95,13 +98,19 @@ def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True)
         raise ValueError('Unknown research module')
     if input_data is not None and len(requested) != 1:
         raise ValueError('Import one research module at a time')
+    if night_scheduled and requested != ['night-radar']:
+        raise ValueError('Scheduled nightly mode requires only night-radar')
     results = []
 
     def deliver(module, data):
         # Use the actual completion time. The data itself retains the requested
         # cutoff and its own market times; publication does not invent evidence.
         data = dict(data, run_started_at=started.isoformat())
-        outcome = publish(module, data, attempted_at=dt.datetime.now(TZ))
+        if module == 'night-radar':
+            from night_radar_store import publish_report
+            outcome = publish_report(data)
+        else:
+            outcome = publish(module, data, attempted_at=dt.datetime.now(TZ))
         if rebuild and outcome['changed']:
             try:
                 build()
@@ -116,7 +125,8 @@ def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True)
         if is_paused(module):
             return paused_outcome(module), None
         try:
-            data = run_module(module, now, phase, input_data=supplied, hot=hot_data)
+            options = {'scheduled':night_scheduled} if module == 'night-radar' else {}
+            data = run_module(module, now, phase, input_data=supplied, hot=hot_data, **options)
             return deliver(module, data), data
         except StrategyPausedError:
             # A changed policy must not replace the last historical report.
@@ -124,7 +134,14 @@ def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True)
         except Exception as exc:
             # Detailed raw runs stay private; no path/credential-bearing exception
             # messages are returned to the page or automation report.
-            outcome = record_failure(module, '本次研究执行或数据核验失败，请检查本地原始证据。', run_started_at=started)
+            if module == 'night-radar':
+                from night_radar import normalize
+                from night_radar_store import publish_report
+                failed = normalize({'schema_version':1,'sections':{}},now)
+                if night_scheduled: failed.update(mode='daily',summary='定时晚报本次采集失败，未产生有效新数据')
+                outcome = publish_report(failed)
+            else:
+                outcome = record_failure(module, '本次研究执行或数据核验失败，请检查本地原始证据。', run_started_at=started)
             if rebuild and outcome['changed']:
                 try:
                     build()
@@ -158,7 +175,7 @@ def refresh(modules, *, as_of=None, phase='auto', input_data=None, rebuild=True)
         tasks = []
         if 'hot' in requested or 'dragon' in requested:
             tasks.append(pool.submit(hot_and_dragon))
-        for module in ('yichujifa', 'prelaunch', 'three-step', 'sector-radar'):
+        for module in ('yichujifa', 'prelaunch', 'three-step', 'sector-radar', 'night-radar'):
             if module in requested:
                 tasks.append(pool.submit(lambda m=module: [execute(m, input_data)[0]]))
         for task in concurrent.futures.as_completed(tasks):
@@ -177,6 +194,7 @@ def main():
     parser.add_argument('--snapshots', type=Path, help='Native three-frame evidence for --live-review')
     parser.add_argument('--enrichment', type=Path, help='Prelaunch evidence bound to input and rules fingerprints')
     parser.add_argument('--no-build', action='store_true', help='Publish private results without building the page')
+    parser.add_argument('--night-scheduled', action='store_true', help='Night radar only: delayed scheduled 22:00 edition')
     args = parser.parse_args()
     when = stamp(args.as_of) if args.as_of else dt.datetime.now(TZ)
     if when is None:
@@ -194,7 +212,7 @@ def main():
             parser.error('Bound enrichment requires --module prelaunch and --input')
         input_data = {'prelaunch_input':input_data,'enrichment':_read_input(args.enrichment)}
     result = refresh(modules, as_of=when, phase=args.phase,
-                     input_data=input_data, rebuild=not args.no_build)
+                     input_data=input_data, rebuild=not args.no_build, night_scheduled=args.night_scheduled)
     print(json.dumps(result, ensure_ascii=False))
     return 2 if any(x['status'] == 'unavailable' or x.get('page_status') == 'failed'
                     or (args.module != 'all' and x['status'] == 'paused') for x in result['modules']) else 0

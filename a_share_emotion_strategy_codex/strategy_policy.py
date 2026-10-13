@@ -6,7 +6,7 @@ import json
 
 from research_store import load_config
 
-CONTEXT_MODULES = frozenset(('hot', 'sector-radar'))
+CONTEXT_MODULES = frozenset(('hot', 'sector-radar', 'night-radar'))
 
 
 class StrategyPausedError(RuntimeError):

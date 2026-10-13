@@ -10,7 +10,7 @@ from research_store import research_path, read_json, atomic_json, update_lock
 from strategy_policy import is_paused, require_enabled
 
 TZ = ZoneInfo('Asia/Shanghai')
-FOLDERS = {'hot': 'hot_sectors', 'dragon': 'dragon', 'yichujifa': 'yichujifa', 'prelaunch': 'prelaunch', 'three-step':'three_step', 'sector-radar':'sector_radar'}
+FOLDERS = {'hot': 'hot_sectors', 'dragon': 'dragon', 'yichujifa': 'yichujifa', 'prelaunch': 'prelaunch', 'three-step':'three_step', 'sector-radar':'sector_radar', 'night-radar':'night_radar'}
 STATUSES = {'complete', 'partial', 'empty', 'unavailable'}
 
 

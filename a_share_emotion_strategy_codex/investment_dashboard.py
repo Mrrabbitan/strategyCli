@@ -121,6 +121,7 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', polic
     from late_day_research import render_page as render_late_day
     from three_step_views import render_page as render_three_step
     from sector_radar_views import render_page as render_sector_radar
+    from night_radar_views import render_page as render_night_radar
     report_date = report_date or latest_report_date()
     policy_pages = policy_pages or {}
     data = {'reports': verified_reports(report_date, slots), 'report_date': str(report_date)}
@@ -130,6 +131,7 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', polic
         '@@PRELAUNCH@@': policy_pages['prelaunch'] if 'prelaunch' in policy_pages else render_module('prelaunch'),
         '@@FED_RESEARCH@@': render_fed_research(), '@@PLAYBOOKS@@': render_playbooks(),
         '@@RESEARCH_TOPICS@@': render_topics(exclude=('late-day',)),
+        '@@NIGHT_RADAR@@': render_night_radar(),
         '@@LATE_DAY@@': policy_pages['late-day'] if 'late-day' in policy_pages else render_late_day(),
         '@@THREE_STEP@@': policy_pages['three-step'] if 'three-step' in policy_pages else render_three_step(),
         '@@SECTOR_RADAR@@': render_sector_radar(),

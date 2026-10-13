@@ -20,6 +20,8 @@
     switchPage(parent.id.slice(5));
     const radarDay = target.closest('[data-radar-day]'), radarList = target.closest('[data-radar-list]');
     if (radarDay) selectRadarDay(radarDay.dataset.radarDay, radarList?.dataset.radarList);
+    const nightDay = target.closest('[data-night-day]');
+    if (nightDay) selectNightDay(nightDay.dataset.nightDay);
     if (target.tagName === 'DETAILS') target.open = true;
     requestAnimationFrame(() => target.scrollIntoView({block:'start'}));
   }
@@ -88,7 +90,33 @@
   }
   function saveReading() {
     const filters = [...document.querySelectorAll('[data-research-search]')].map(el => ({module:el.dataset.researchSearch, search:el.value, filter:document.querySelector(`[data-research-filter="${el.dataset.researchSearch}"]`)?.value || 'all'}));
-    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, filters, radar:radarReading(), open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
+    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, filters, radar:radarReading(), night:document.querySelector('[data-night-radar]')?.dataset.nightSelectedDate, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
+  }
+  function selectNightDay(date) {
+    const root = document.querySelector('[data-night-radar]'); if (!root) return;
+    const days = [...root.querySelectorAll('[data-night-day]')];
+    const chosen = days.find(day => day.dataset.nightDay === date) || days[0]; if (!chosen) return;
+    root.dataset.nightSelectedDate = chosen.dataset.nightDay;
+    days.forEach(day => { day.hidden = day !== chosen; });
+    root.querySelectorAll('[data-night-date]').forEach(button => {
+      const active = button.dataset.nightDate === chosen.dataset.nightDay;
+      button.setAttribute('aria-selected', String(active)); button.tabIndex = active ? 0 : -1;
+    });
+  }
+  function setupNightTabs() {
+    const root = document.querySelector('[data-night-radar]'); if (!root) return;
+    const buttons = [...root.querySelectorAll('[data-night-date]')];
+    buttons.forEach((button, index) => {
+      button.addEventListener('click', () => selectNightDay(button.dataset.nightDate));
+      button.addEventListener('keydown', event => {
+        if (!['ArrowLeft','ArrowRight','Home','End'].includes(event.key)) return;
+        event.preventDefault();
+        const next = event.key === 'Home' ? 0 : event.key === 'End' ? buttons.length - 1 :
+          (index + (event.key === 'ArrowRight' ? 1 : -1) + buttons.length) % buttons.length;
+        selectNightDay(buttons[next].dataset.nightDate); buttons[next].focus();
+      });
+    });
+    selectNightDay(root.dataset.nightSelectedDate);
   }
   function filterResearch(module) {
     const panel = document.querySelector(`[data-module="${module}"]`);if (!panel) return;
@@ -169,6 +197,7 @@
   function schedule() { clearInterval(timer);if (!document.hidden) { refresh();timer=setInterval(refresh,30000); } }
   document.addEventListener('visibilitychange',schedule);
   setupRadarTabs();
+  setupNightTabs();
   locateHash();
   try {
     const stored = JSON.parse(sessionStorage.getItem('investment-reading') || 'null');
@@ -184,6 +213,7 @@
         filterResearch(f.module);
       });
       restoreRadarReading(stored.radar);
+      selectNightDay(stored.night);
       requestAnimationFrame(()=>window.scrollTo(0,stored.scroll));
     }
   } catch { /* A stale reading preference never blocks the working surface. */ }

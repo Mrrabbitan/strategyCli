@@ -148,3 +148,9 @@ python3 -m unittest discover -s tests -v
 `--input` 接受私有目录下原始证据包（`signal_date, sectors, stocks, benchmark`及可选`native_inputs`），不接受已通过的结果快照。native_inputs分别是五个原生Skill输入，仍重算；三步的全主板数据不能用板块子集替代。没有真实尾盘分钟与14:30—14:57证据只显示历史资料不足，不用收盘价模拟尾盘参与。
 
 本机快照独立保存在`research/sector_radar`，保留最后成功、最新尝试、来源指纹与完整历史。页面只读已存每日列表；完整证据仅留本地，不开放文件读取接口。当前分类回看收益是固定成员研究组合，不是供应商指数或历史可交易收益。所有新增排名仅是未回测的研究默认值。
+
+# 每晚22:00投资雷达
+
+六栏信息日报已接入时点报告：连板梯队、公司公告、业绩盈喜、股份回购、营业部席位、机构净买。仅沪深主板非ST；精选表与完整折叠记录分开，单日/累计榜和预案/实际执行分别展示。数据缺失不等于空池。
+
+运行 `python3 refresh_research.py --module night-radar --as-of <带时区时点> --phase close`；定时22:00截止使用 `--night-scheduled`。历史导入使用私有原生证据 `--input`，完整规则见 [晚报说明](docs/playbooks/night-radar.md)。页面定位 `#topic-night-radar`。原选股任务和暂停状态不变；此模块不进入默认`all`。
