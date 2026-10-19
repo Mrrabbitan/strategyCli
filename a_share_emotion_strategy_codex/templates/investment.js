@@ -3,12 +3,15 @@
   const $ = s => document.querySelector(s);
   let activePage = 'hot', busy = false, version = null, timer;
   function switchPage(next) {
-    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','strategy','reports'].includes(next)) next = 'reports';
+    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','strategy','reports'].includes(next)) next = 'reports';
     activePage = next;
     document.querySelectorAll('.page').forEach(el => { el.hidden = el.id !== `page-${next}`; });
     document.querySelectorAll('[data-page]').forEach(el => {
       el.classList.toggle('active', el.dataset.page === next);
-      if (el.dataset.page === next) el.setAttribute('aria-current', 'page'); else el.removeAttribute('aria-current');
+      if (el.dataset.page === next) {
+        el.setAttribute('aria-current', 'page');
+        el.scrollIntoView?.({block:'nearest', inline:'nearest'});
+      } else el.removeAttribute('aria-current');
     });
   }
   function locateHash() {

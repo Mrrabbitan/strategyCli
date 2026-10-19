@@ -17,7 +17,7 @@ const content = execFileSync(process.env.PYTHON || 'python3', ['-c', [
 ].join('\n')], {cwd:project, encoding:'utf8'});
 const css = fs.readFileSync(path.join(project, 'templates/investment.css'), 'utf8');
 const js = fs.readFileSync(path.join(project, 'templates/investment.js'), 'utf8');
-const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','strategy','reports'];
+const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','strategy','reports'];
 const html = '<!doctype html><html lang="zh-CN"><head><meta charset="utf-8"><style>'+css+'</style></head><body>'+
   '<nav class="navigation">'+pages.map(p=>`<button data-page="${p}">${p}</button>`).join('')+'</nav><main>'+
   pages.map(p=>`<section class="page" id="page-${p}" hidden>${p==='reports'?content:'Fictional page'}</section>`).join('')+
@@ -60,8 +60,8 @@ const server = http.createServer((req,res)=>{
     assert.equal(await page.locator('[data-night-day]:not([hidden])').getAttribute('data-night-day'),'2026-08-12');
     await page.setViewportSize({width:390,height:844});
     assert.ok(await page.locator('[data-night-day="2026-08-12"] .night-table-scroll').first().evaluate(el=>el.scrollWidth>el.clientWidth));
-    assert.equal(await page.locator('[data-page]').count(),9);
+    assert.equal(await page.locator('[data-page]').count(),10);
     assert.deepEqual(errors,[]);
-    console.log('Night radar browser: date keyboard tabs, deep link, reload date/detail/scroll restoration, mobile horizontal tables and nine entries passed.');
+    console.log('Night radar browser: date keyboard tabs, deep link, reload date/detail/scroll restoration, mobile horizontal tables and ten entries passed.');
   } finally {if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

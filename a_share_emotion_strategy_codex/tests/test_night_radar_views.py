@@ -171,14 +171,14 @@ class NightRadarViewsTests(unittest.TestCase):
         self.assertNotIn('仅完整展开可见', markdown)
         self.assertNotIn('###', markdown)
 
-    def test_markdown_escapes_table_and_markup_and_preserves_nine_entries(self):
+    def test_markdown_escapes_table_and_markup_and_preserves_ten_entries(self):
         report = fixture()
         report['sections']['limit_up']['featured'][0]['risk'] = '<script>|x\n[bad]*'
         markdown = views.render_markdown(report)
         self.assertIn('&lt;script&gt;\\|x \\[bad\\]\\*', markdown)
-        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'AUTOSTRATEGY_PRIVATE_ROOT': temp}), patch.object(views, 'load_reports', return_value=[report]), patch('research_topics.render_topics', return_value='<div id="test-existing-topics"></div>'):
+        with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'AUTOSTRATEGY_PRIVATE_ROOT': temp}), patch.object(views, 'load_reports', return_value=[report]), patch('research_topics.render_topics', side_effect=lambda **kw: '' if kw.get('include') else '<div id="test-existing-topics"></div>'):
             page = render_dashboard(dt.date(2026, 8, 12))
-        self.assertEqual(page.count('class="nav-item'), 9)
+        self.assertEqual(page.count('class="nav-item'), 10)
         self.assertIn('id="topic-night-radar"', page)
         self.assertIn('id="page-reports"', page)
         self.assertNotIn('@@', page)

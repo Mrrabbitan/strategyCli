@@ -22,6 +22,7 @@
 #page-late-day table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}#page-late-day th,#page-late-day td{padding:11px 12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}#page-late-day th{background:#edf2f5;font-weight:600;white-space:nowrap}#page-late-day .late-day-audit table{min-width:1020px}#page-late-day .late-day-audit td:first-child{min-width:165px}#page-late-day .late-day-audit td:last-child{min-width:160px}#page-late-day details[id]{scroll-margin-top:90px}#page-late-day .late-day-audit>h3{margin-top:28px}
 
 /* Independent close-only research surface; no styling change to old strategies. */
+#page-sector-funds{scroll-margin-top:80px}#page-sector-funds table{width:100%;min-width:820px;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}#page-sector-funds th,#page-sector-funds td{padding:12px;text-align:left;vertical-align:top;border-bottom:1px solid var(--line)}#page-sector-funds th{background:#edf2f5;white-space:nowrap}#page-sector-funds .playbook{margin:20px 0}
 #page-three-step,#page-three-step details[id]{scroll-margin-top:85px}
 #page-three-step .research-status{text-align:left;max-width:none;padding:18px 22px;white-space:normal;overflow-wrap:anywhere}
 #page-three-step .research-status b{font-size:20px}

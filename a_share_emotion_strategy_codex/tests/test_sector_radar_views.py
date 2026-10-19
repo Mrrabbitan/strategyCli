@@ -131,12 +131,12 @@ class SectorRadarViewsTests(unittest.TestCase):
         self.assertNotIn('尚待核验', text)
         self.assertNotIn('费用待验证', text)
 
-    def test_no_real_lists_in_public_fixtures_and_nine_pages_remain(self):
+    def test_no_real_lists_in_public_fixtures_and_ten_pages_remain(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'AUTOSTRATEGY_PRIVATE_ROOT': temp}):
             text = render_dashboard(dt.date(2026, 9, 23))
-        for name in ('hot', 'dragon', 'yichujifa', 'prelaunch', 'late-day', 'three-step', 'sector-radar', 'strategy', 'reports'):
+        for name in ('hot', 'dragon', 'yichujifa', 'prelaunch', 'late-day', 'three-step', 'sector-radar', 'sector-funds', 'strategy', 'reports'):
             self.assertIn(f'id="page-{name}"', text)
-        self.assertEqual(text.count('class="nav-item'), 9)
+        self.assertEqual(text.count('class="nav-item'), 10)
         for old in ('strategy-late-day', 'strategy-three-step', 'dragon-cycle-watchlist', 'hot-sector-board'):
             self.assertIn(f'id="{old}"', text)
         self.assertNotIn('@@', text)

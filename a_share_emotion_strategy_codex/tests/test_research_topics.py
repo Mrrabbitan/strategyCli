@@ -89,6 +89,32 @@ class TopicTests(unittest.TestCase):
         self.assertIn('本轮资料不可用，未发布新结果', text)
         self.assertNotIn('资金时点未知的参考快照', text)
 
+    def test_fund_topic_has_own_tab_without_duplication_or_broken_old_anchor(self):
+        from investment_dashboard import render_dashboard
+        publish_topic(self.data, now=self.now)
+        funds = dict(self.data, topic_id='sector-fund-pulse', title='人工资金参考')
+        publish_topic(funds, now=self.now)
+        page = render_dashboard(self.now.date())
+        fund_page = page.split('<section id="page-sector-funds"', 1)[1].split('<section id="page-strategy"', 1)[0]
+        reports = page.split('<section id="page-reports"', 1)[1]
+        self.assertEqual(page.count('id="topic-sector-fund-pulse"'), 1)
+        self.assertIn('id="topic-sector-fund-pulse"', fund_page)
+        self.assertNotIn('id="topic-sector-fund-pulse"', reports)
+        self.assertIn('id="topic-sample"', reports)
+        self.assertNotIn('id="topic-sample"', fund_page)
+        self.assertIn('data-page="sector-funds"', page)
+        self.assertNotIn('@@', page)
+
+    def test_topic_include_does_not_copy_other_topics_or_their_failure(self):
+        from research_store import atomic_json
+        funds = dict(self.data, topic_id='sector-fund-pulse')
+        publish_topic(funds, now=self.now)
+        atomic_json(research_path('topics/broken/current.json'), {'invalid': True})
+        only_funds = render_topics(now=self.now, include=('sector-fund-pulse',))
+        self.assertIn('topic-sector-fund-pulse', only_funds)
+        self.assertNotIn('独立专题资料不可用', only_funds)
+        self.assertNotIn('topic-sector-fund-pulse', render_topics(now=self.now, exclude=('sector-fund-pulse',)))
+
     def test_malformed_url_is_isolated_from_other_topics(self):
         from research_store import atomic_json
         publish_topic(self.data, now=self.now)

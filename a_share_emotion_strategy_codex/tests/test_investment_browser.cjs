@@ -9,7 +9,7 @@ const path = require('node:path');
 const http = require('node:http');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const js = fs.readFileSync(path.join(__dirname, '../templates/investment.js'), 'utf8');
-const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','strategy','reports'];
+const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','strategy','reports'];
 const panel = `<div data-module="three-step" data-module-until="2099-01-01T15:00:00+08:00">
 <div class="research-status"><b>Research</b></div><p class="module-validity">Fictional fixture</p>
 <span class="qualified-count">1</span><input data-research-search="three-step">
@@ -19,8 +19,12 @@ const panel = `<div data-module="three-step" data-module-until="2099-01-01T15:00
 <details id="fixture-b" data-candidate data-search="fiction-b" data-bucket="pending"><summary>B <span class="candidate-state">Pending</span></summary>Fictional only</details>
 </div></div>`;
 const rules = '<a href="#strategy-event-timing">Event timing</a><article id="strategy-event-timing"><h2>Fictional research overlay</h2><details id="strategy-event-timing-rules"><summary>Rules and source</summary>Fictional rules only</details></article><article id="strategy-late-day">Fictional existing rules</article>';
+const funds = '<article id="topic-sector-fund-pulse"><h2>Fictional sector funds</h2>'+
+  '<p>Artificial publisher reference only</p><details id="fixture-fund-sources"><summary>Fund sources</summary>'+
+  '<div style="height:900px">Fictional source evidence only</div></details>'+
+  '<div style="height:1500px">Fictional scroll restoration area</div></article>';
 const html = '<!doctype html><style>[hidden]{display:none!important}</style>'+pages.map(p=>`<button data-page="${p}">${p}</button>`).join('')+
-  pages.map(p=>`<section class="page" id="page-${p}" hidden>${p==='three-step'?panel:p==='strategy'?rules:p}</section>`).join('')+
+  pages.map(p=>`<section class="page" id="page-${p}" hidden>${p==='three-step'?panel:p==='strategy'?rules:p==='sector-funds'?funds:p}</section>`).join('')+
   '<div id="update-state"></div><script>'+js+'</script>';
 let revision = 'one';
 const server = http.createServer((req,res)=>{
@@ -52,9 +56,26 @@ const server = http.createServer((req,res)=>{
     });
     assert.equal(await page.locator('.qualified-count').textContent(),'0 条');
     assert.equal(await page.locator('[data-candidate][data-bucket="other"]').count(),2);
-    assert.equal(await page.locator('[data-page]').count(),9);
+    assert.equal(await page.locator('[data-page]').count(),10);
     await page.locator('[data-page="sector-radar"]').click();
     assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-radar');
+    await page.locator('[data-page="sector-funds"]').click();
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-funds');
+    assert.equal(await page.locator('[data-page="sector-funds"]').getAttribute('aria-current'),'page');
+    const fundsVersionReady=page.waitForResponse(r=>r.url().endsWith('/api/dashboard-version'));
+    await page.goto(`http://127.0.0.1:${server.address().port}/#topic-sector-fund-pulse`);
+    await fundsVersionReady;
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-funds');
+    await page.locator('#fixture-fund-sources summary').click();
+    await page.evaluate(()=>window.scrollTo(0,720));
+    const fundsScrollBefore=await page.evaluate(()=>window.scrollY);
+    assert.ok(fundsScrollBefore>700);
+    revision='three';const fundsReloaded=page.waitForEvent('load');
+    await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await fundsReloaded;
+    await page.waitForFunction(()=>Math.abs(window.scrollY-720)<10);
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-funds');
+    assert.notEqual(await page.locator('#fixture-fund-sources').getAttribute('open'),null);
+    assert.ok(Math.abs((await page.evaluate(()=>window.scrollY))-fundsScrollBefore)<10);
     await page.locator('[data-page="three-step"]').click();
     assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-three-step');
     await page.goto(`http://127.0.0.1:${server.address().port}/#strategy-event-timing`);
@@ -65,6 +86,6 @@ const server = http.createServer((req,res)=>{
     await page.evaluate(()=>{location.hash='strategy-late-day';});
     assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-strategy');
     assert.deepEqual(errors,[]);
-    console.log('Offline browser: nine tabs, rule anchors, filtering, reload restoration and expiry passed.');
+    console.log('Offline browser: ten tabs, fund legacy anchor and detail/scroll restoration, rule anchors, filtering and expiry passed.');
   } finally {if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

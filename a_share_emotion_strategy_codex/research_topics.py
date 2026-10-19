@@ -244,12 +244,12 @@ def publish_topic(data, *, now=None):
     return {'changed': True, 'fingerprint': digest}
 
 
-def render_topics(*, now=None, exclude=()):
+def render_topics(*, now=None, exclude=(), include=None):
     now = now or dt.datetime.now(TZ)
     escape = lambda x: html.escape(str(x), quote=True)
     sections = []
     for path in sorted(research_path('topics').glob('*/current.json')):
-        if path.parent.name in exclude:
+        if path.parent.name in exclude or (include is not None and path.parent.name not in include):
             continue
         try:
             data = validate(read_json(path), now)
@@ -269,6 +269,9 @@ def render_topics(*, now=None, exclude=()):
         rows = ''.join('<tr>' + ''.join(f'<td>{escape(row[k])}</td>' for k in
                        ('name', 'industry_state', 'market_state', 'evidence', 'counter', 'next')) + '</tr>'
                        for row in data['directions'])
+        direction_table = ('<div style="overflow-x:auto"><table><thead><tr><th>方向</th><th>产业状态</th>'
+                           '<th>市场状态</th><th>依据</th><th>反证与缺口</th><th>下一步</th></tr></thead>'
+                           f'<tbody>{rows}</tbody></table></div>') if rows else ''
         changes = ''.join(f'<li>{escape(x)}</li>' for x in data['changes'])
         missing = ''.join(f'<li>{escape(x)}</li>' for x in data['missing'])
         sources = _source_links(data.get('sources', []))
@@ -281,7 +284,7 @@ def render_topics(*, now=None, exclude=()):
 <p>{cutoff_label} {escape(data['as_of'])}{information} · 本次计算 {escape(data['generated_at'])} · 观察期限 {escape(data['valid_until'])}</p>
 <p>{escape(data['summary'])}</p><h3>相较上次的变化</h3><ul>{changes}</ul>
 {_render_decision_tiers(data)}
-<div style="overflow-x:auto"><table><thead><tr><th>方向</th><th>产业状态</th><th>市场状态</th><th>依据</th><th>反证与缺口</th><th>下一步</th></tr></thead><tbody>{rows}</tbody></table></div>
+{direction_table}
 {_stock_comparison(data)}
 <details><summary>来源时间与未验证条件</summary><ul>{sources}</ul><ul>{missing}</ul></details>
 </section>''')

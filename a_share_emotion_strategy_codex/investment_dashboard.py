@@ -130,7 +130,9 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', polic
         '@@YICHUJIFA@@': policy_pages['yichujifa'] if 'yichujifa' in policy_pages else render_module('yichujifa'),
         '@@PRELAUNCH@@': policy_pages['prelaunch'] if 'prelaunch' in policy_pages else render_module('prelaunch'),
         '@@FED_RESEARCH@@': render_fed_research(), '@@PLAYBOOKS@@': render_playbooks(),
-        '@@RESEARCH_TOPICS@@': render_topics(exclude=('late-day',)),
+        '@@RESEARCH_TOPICS@@': render_topics(exclude=('late-day', 'sector-fund-pulse')),
+        '@@SECTOR_FUNDS@@': render_topics(include=('sector-fund-pulse',)) or
+            '<p class="notice">板块资金尚未取得可展示的记录；后续同花顺资金研究会在这里更新。</p>',
         '@@NIGHT_RADAR@@': render_night_radar(),
         '@@LATE_DAY@@': policy_pages['late-day'] if 'late-day' in policy_pages else render_late_day(),
         '@@THREE_STEP@@': policy_pages['three-step'] if 'three-step' in policy_pages else render_three_step(),
