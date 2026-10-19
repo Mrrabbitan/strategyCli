@@ -184,6 +184,43 @@ class SinaTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, '不等于'):
             parse_sina_minutes(payload, 'new_fakea', '虚构甲', NOW)
 
+    def test_cumulative_reset_rejects_whole_industry_even_if_price_rises(self):
+        payload = sina_minutes()
+        latest = payload[1][0]
+        latest.update(avg_price='200', avg_changeratio='.09',
+                      inamount='30000000', outamount='10000000', netamount='20000000')
+        with self.assertRaisesRegex(ValueError, '回退.*整体拒绝'):
+            parse_sina_minutes(payload, 'new_fakea', '虚构甲', NOW,
+                               max_age_seconds=900)
+        # The native response is descending: a reset inside it, not only its
+        # last chronological row, must also invalidate the entire sequence.
+        payload = sina_minutes()
+        payload[1][15].update(inamount='10000000', outamount='1000000',
+                              netamount='9000000')
+        with self.assertRaisesRegex(ValueError, '回退'):
+            parse_sina_minutes(payload, 'new_fakea', '虚构甲', NOW)
+
+    def test_negative_net_with_both_cumulative_sides_growing_is_valid(self):
+        payload = sina_minutes()
+        for index, row in enumerate(reversed(payload[1])):
+            incoming, outgoing = 100000000+index*1000000, 200000000+index*2000000
+            row.update(inamount=str(incoming), outamount=str(outgoing),
+                       netamount=str(incoming-outgoing), ratioamount='-.0345')
+        result = parse_sina_minutes(payload, 'new_fakea', '虚构甲', NOW)
+        self.assertEqual(result['main_cny'], -130000000)
+        self.assertEqual(result['delta_30m_cny'], -30000000)
+        self.assertEqual(result['inflow_cny'], 130000000)
+        self.assertEqual(result['outflow_cny'], 260000000)
+
+    def test_cumulative_rounding_tolerance_is_limited_to_two_cents(self):
+        payload = sina_minutes()
+        payload[1][0].update(outamount='99999999.98', netamount='130000000.02')
+        self.assertEqual(parse_sina_minutes(payload, 'new_fakea', '虚构甲', NOW)['outflow_cny'],
+                         99999999.98)
+        payload[1][0].update(outamount='99999999.97', netamount='130000000.03')
+        with self.assertRaisesRegex(ValueError, '回退'):
+            parse_sina_minutes(payload, 'new_fakea', '虚构甲', NOW)
+
     def test_incomplete_window_and_lunch_do_not_create_delta(self):
         payload = sina_minutes(count=30)
         self.assertIsNone(parse_sina_minutes(payload, 'new_fakea', '虚构甲', NOW)['delta_30m_cny'])

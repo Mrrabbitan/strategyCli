@@ -218,7 +218,7 @@ def parse_sina_minutes(payload, code: str, name: str, now, source_url=None,
         raise ValueError('新浪分钟总数缺失') from exc
     if count != len(payload[1]) or not 1 <= count <= 1000:
         raise ValueError('新浪分钟分页不完整')
-    parsed = []
+    parsed, cumulative_pairs = [], []
     for original in payload[1]:
         try:
             moment = dt.datetime.fromisoformat(
@@ -232,7 +232,9 @@ def parse_sina_minutes(payload, code: str, name: str, now, source_url=None,
             change = float(_number(str(original['avg_changeratio']))*100)
             native_net = float(_number(str(original['ratioamount']))*100)
             parsed.append(dict(time=moment.isoformat(), net_cny=float(net),
+                               inflow_cny=float(incoming), outflow_cny=float(outgoing),
                                change_pct=change, native_net_pct=native_net))
+            cumulative_pairs.append((incoming, outgoing))
         except (KeyError, TypeError, AttributeError) as exc:
             raise ValueError('新浪资金自身时间、金额或同刻报价缺失') from exc
     moments = [dt.datetime.fromisoformat(x['time']) for x in parsed]
@@ -241,8 +243,16 @@ def parse_sina_minutes(payload, code: str, name: str, now, source_url=None,
     if all(b < a for a, b in zip(moments, moments[1:])):
         parsed.reverse()
         moments.reverse()
+        cumulative_pairs.reverse()
     elif not all(b > a for a, b in zip(moments, moments[1:])):
         raise ValueError('新浪分钟资金时序混乱')
+    # Gross cumulative sides must not decrease. A revision/reset changes the
+    # basis for every subsequent subtraction; reject this entire industry,
+    # rather than selecting an earlier row or manufacturing a negative delta.
+    for before, after in zip(cumulative_pairs, cumulative_pairs[1:]):
+        if any(current+Decimal('.02') < previous
+               for previous, current in zip(before, after)):
+            raise ValueError('新浪累计流入或流出回退，存在源修订或重置；该行业整体拒绝')
     latest = moments[-1]
     _fresh(latest, now, max_age_seconds)
     anchor = latest-dt.timedelta(minutes=30)
@@ -257,6 +267,7 @@ def parse_sina_minutes(payload, code: str, name: str, now, source_url=None,
     return {'code': code, 'name': name, 'source_time': latest.isoformat(),
             # Internal common ranking key only; external labels must use flow_label.
             'main_cny': last['net_cny'], 'delta_30m_cny': delta,
+            'inflow_cny': last['inflow_cny'], 'outflow_cny': last['outflow_cny'],
             'delta_anchor': anchor.isoformat() if delta is not None else None,
             'quote_time': latest.isoformat(), 'change_pct': last['change_pct'],
             'native_net_pct': last['native_net_pct'], 'turnover_cny': None,

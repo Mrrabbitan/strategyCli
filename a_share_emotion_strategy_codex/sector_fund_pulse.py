@@ -24,7 +24,7 @@ from market_calendar import is_trading_day
 from research_store import atomic_json, read_json, research_path, update_lock
 
 TZ = ZoneInfo('Asia/Shanghai')
-VERSION = '1.1.0'
+VERSION = '1.1.1'
 SOURCE = 'https://data.eastmoney.com/bkzj/hy.html'
 SCOPE = 'm:90+t:2+f:!50'
 SLOTS = ('09:30', '10:00', '10:30', '11:00', '11:30',
