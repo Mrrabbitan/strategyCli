@@ -24,8 +24,10 @@ from market_calendar import is_trading_day
 from research_store import atomic_json, read_json, research_path, update_lock
 
 TZ = ZoneInfo('Asia/Shanghai')
-VERSION = '1.1.1'
+VERSION = '1.2.0'
 SOURCE = 'https://data.eastmoney.com/bkzj/hy.html'
+THS_SOURCE = 'https://data.10jqka.com.cn/funds/hyzjl/'
+SOURCE_POLICY = 'ths-only'
 SCOPE = 'm:90+t:2+f:!50'
 SLOTS = ('09:30', '10:00', '10:30', '11:00', '11:30',
          '13:00', '13:30', '14:00', '14:30', '15:00')
@@ -430,10 +432,24 @@ def _reference_report(primary, snapshot, raw, finished):
             source_url=snapshot['source_urls'][0],
             coverage={'expected': snapshot['expected_count'], 'valid_funds': 0,
                       'valid_quotes': 0, 'failed_funds': 0, 'reference_records': len(rows)},
-            missing=['东财实时完整榜未恢复；本表为同花顺独立参考。',
-                     '同花顺没有资金自身日期或时刻：无法确认当日实时性、半小时增量或排名变化。'],
+            missing=([] if primary.get('source_policy') == SOURCE_POLICY else
+                     ['东财实时完整榜未恢复；本表为同花顺独立参考。'])+
+                    ['同花顺没有资金自身日期或时刻：无法确认归属行情日、实时性、半小时增量或排名变化。'],
             extra_sources=[])
-    report['method'] = '独立供应商完整行业表按原生累计净额降序；延迟或时点未知参考不作为实时资金转向结论。'
+        if snapshot.get('coverage_kind') == 'publisher_top10':
+            report['coverage_kind'] = 'publisher_top10'
+            report['universe_complete'] = False
+            report['universe_fingerprint'] = None
+            report['published_list_fingerprint'] = digest([r['code'] for r in rows])
+            report['scope'] = '同花顺原站发布的行业资金前十；未拉取全行业池，不是仅沪深主板资金'
+            if snapshot.get('definition_url'):
+                report['extra_sources'] = [{'label': '同花顺原站资金榜定义',
+                                            'url': snapshot['definition_url']}]
+        report['coverage']['auxiliary_quotes'] = sum(r.get('change_pct') is not None for r in rows)
+        report['coverage_basis'] = snapshot.get('coverage_basis', '完整分页与全量图表核验')
+    report['method'] = '同一供应商完整行业表按原生净额降序；延迟或时点未知参考不作为实时资金转向结论。'
+    if report.get('coverage_kind') == 'publisher_top10':
+        report['method'] = '采用同花顺原站发布的前十及原生净额；不是自行完成全行业同刻排名，也不是收益概率。'
     report['raw_fingerprint'] = digest(raw)
     report['failure_signature'] = digest({'provider': report['provider'],
         'time_quality': report['time_quality'], 'missing': report['missing']})
@@ -442,7 +458,7 @@ def _reference_report(primary, snapshot, raw, finished):
 
 def collect_with_fallback(now, *, slot=None, clock=None, feed=None,
                           sina_collector=None, ths_collector=None):
-    """Independent sources, bounded attempts. Never join rows across providers.
+    """Legacy replay/testing only; production run now uses collect_ths_only.
 
     Explicit test feeds do not network to fallback providers unless collectors
     are also injected. A failed primary attempt remains in the private report.
@@ -489,6 +505,50 @@ def collect_with_fallback(now, *, slot=None, clock=None, feed=None,
     return report, raw
 
 
+def collect_ths_only(now, *, slot=None, clock=None, collector=None, error=None):
+    """Current user policy: THS only, no EM/Sina substitution on failure."""
+    raw = []
+    base = {'schema_version': 1, 'module_id': 'sector-fund-pulse',
+        'rule_version': VERSION, 'source_policy': SOURCE_POLICY, 'provider': 'ths',
+        'flow_label': '同花顺行业原生资金净额',
+        'flow_definition': '原站普通资金净额，未标为主力；不识别真实账户，不证明后续买入计划。',
+        'started_at': now.isoformat(), 'sampled_at': now.isoformat(),
+        'generated_at': now.isoformat(), 'slot': slot,
+        'scope': '同花顺原站行业资金前十；未拉取全行业池，不是仅沪深主板资金',
+        'status': 'unavailable', 'ranking_complete': False,
+        'universe_complete': False, 'universe_fingerprint': None,
+        'coverage_kind': 'publisher_top10',
+        'coverage': {'expected': 10, 'valid_funds': 0, 'valid_quotes': 0,
+                     'failed_funds': 10, 'reference_records': 0},
+        'top10': [], 'attention_top3': [], 'all_rows': [], 'partial_reference': [],
+        'missing': [], 'transport_notes': [], 'changes': {'available': False},
+        'method': '仅采用同花顺原站发布前十；数据不足不换供应商、不拼接旧榜。',
+        'source_url': THS_SOURCE, 'raw_fingerprint': digest(raw)}
+    try:
+        if error:
+            raise ValueError(error)
+        if collector is None:
+            from sector_fund_alternative import collect_ths_published_top10
+            collector = collect_ths_published_top10
+        snapshot = collector(raw_sink=raw.append, timeout=5)
+        complete = snapshot.get('coverage_kind') == 'publisher_top10' and snapshot.get('published_top10_complete')
+        if (snapshot.get('provider') != '同花顺' or not complete
+                or len(snapshot.get('rows', [])) != snapshot.get('expected_count')):
+            raise ValueError('同花顺行业身份或完整覆盖不足')
+        finished = stamp(clock()) if clock else now
+        report = _reference_report(base, snapshot, raw, finished)
+        report['transport_notes'] = ['仅采用同花顺，不再自动切换东财或新浪。']
+        return report, raw
+    except Exception as exc:
+        finished = stamp(clock()) if clock else now
+        base['sampled_at'] = base['generated_at'] = finished.isoformat()
+        base['missing'] = ['同花顺本轮取数或完整性核验失败：'+str(exc)]
+        base['raw_fingerprint'] = digest(raw)
+        base['failure_signature'] = digest({'source_policy': SOURCE_POLICY,
+                                            'missing': base['missing']})
+        return base, raw
+
+
 def edition(report):
     return digest(report)
 
@@ -506,9 +566,13 @@ def decision(report):
     if report.get('reference_complete'):
         if report.get('slot') and any(r.get('slot') == report['slot'] and
                 (r.get('ranking_complete') or r.get('reference_complete'))
+                and (report.get('source_policy') != SOURCE_POLICY or
+                     (r.get('provider') == 'ths' and r.get('source_policy') == SOURCE_POLICY))
                 for r in state.get('sent', {}).values()):
             return {'notify': False, 'reason': '本时点参考榜已发送', 'edition': version}
-        return {'notify': True, 'reason': '备用来源完整参考榜；不代表实时源已恢复', 'edition': version}
+        reason = ('同花顺原站发布前十参考' if report.get('source_policy') == SOURCE_POLICY
+                  else '备用来源完整参考榜；不代表实时源已恢复')
+        return {'notify': True, 'reason': reason, 'edition': version}
     if report.get('ranking_complete'):
         if report.get('slot') and any(r.get('slot') == report['slot'] and r.get('ranking_complete') is True
                                       for r in state.get('sent', {}).values()):
@@ -542,7 +606,10 @@ def publish(report, raw):
         if report.get('slot'):
             slots = read_json(folder()/'slots.json', {})
             slots[report['slot']] = {'edition': version, 'status': report['status'],
-                                      'ranking_complete': report['ranking_complete']}
+                                      'ranking_complete': report['ranking_complete'],
+                                      'reference_complete': report.get('reference_complete', False),
+                                      'provider': report.get('provider'),
+                                      'source_policy': report.get('source_policy')}
             atomic_json(folder()/'slots.json', slots)
     return {'changed': edition(existing) != version, **decision(report)}
 
@@ -557,16 +624,22 @@ def topic(report):
     display_rows = report.get('reference_top10', []) if reference else (report['top10'] or report['partial_reference'])
     times = [stamp(r['source_time']) for r in (report.get('reference_rows', []) if reference else report['all_rows']) if r.get('source_time')]
     cutoff = min(times, default=now)
+    coverage_label = '原站前十覆盖' if report.get('coverage_kind') == 'publisher_top10' else '参考覆盖'
+    quality_label = '资金时点未知' if report.get('provider') == 'ths' else '延迟参考'
     rows = []
     for row in display_rows:
+        rank_label = '净额第' if report.get('provider') == 'ths' else '累计第'
+        ths = report.get('provider') == 'ths'
         rows.append(dict(name=row['name']+' '+row['code'],
-            industry_state=('参考榜' if reference else '')+(f"累计第{row['rank']}名 · " if row['rank'] else '局部参考，不授予全池名次 · ')+amount(row['main_cny']),
-            market_state=(f"涨幅{row['change_pct']:+.2f}%" if row['change_pct'] is not None else '涨幅缺失')+'；成交额'+amount(row['turnover_cny']),
-            evidence='同场30分钟净增额'+amount(row['delta_30m_cny'])+'；资金时间'+(row['source_time'] or '原站未提供；取得时间不是资金时点'),
+            industry_state=('参考榜' if reference else '')+(f"{rank_label}{row['rank']}名 · " if row['rank'] else '局部参考，不授予全池名次 · ')+amount(row['main_cny']),
+            market_state=(f"涨幅{row['change_pct']:+.2f}%" if row['change_pct'] is not None else '原响应未覆盖涨幅')+('' if ths else '；成交额'+amount(row['turnover_cny'])),
+            evidence=('同花顺同一响应原生净额；资金时点未提供' if ths else '同场30分钟净增额'+amount(row['delta_30m_cny'])+'；资金时间'+(row['source_time'] or '原站未提供；取得时间不是资金时点')),
             counter='；'.join(row['notes']) or '主力为供应商大单分类统计，不能识别真实账户',
             next=('参考线索须取得新的有效同源时间及承接证据；不作为实时操作信号' if reference else '累计和30分钟均为正、涨幅为正后复核；转负或板块走弱则降序关注')))
     priority = [f"优先关注{r['attention_rank']}：{r['name']}；30分钟净增额{amount(r['delta_30m_cny'])}，累计{amount(r['main_cny'])}。" for r in report['attention_top3']]
     changes = priority or [report.get('reference_limit', '暂无完整证据支持关注前三；累计排名与窗口积累情况见表。')]
+    if report.get('source_policy') == SOURCE_POLICY and not reference:
+        changes = ['本轮同花顺数据未取得，未发布新榜；不以其他来源替代。']
     if report.get('reference_lag_seconds'):
         lag = report['reference_lag_seconds']
         changes.append(f"本轮资金自身时间落后实际采样{lag['min']:.0f}—{lag['max']:.0f}秒。")
@@ -574,16 +647,16 @@ def topic(report):
     c = report.get('changes', {})
     if c.get('available'):
         changes.append('新入前十：'+('、'.join(c['new']) or '无')+'；退出前十：'+('、'.join(c['out']) or '无'))
-    return {'schema_version': 1, 'topic_id': 'sector-fund-pulse', 'title': '半小时行业资金雷达',
+    return {'schema_version': 1, 'topic_id': 'sector-fund-pulse', 'title': '同花顺板块资金雷达' if report.get('source_policy') == SOURCE_POLICY else '半小时行业资金雷达',
             'as_of': cutoff.isoformat(), 'generated_at': now.isoformat(),
             'as_of_kind': 'delayed' if reference and times else 'capture' if not times else 'market',
             'valid_until': now.isoformat() if reference else (cutoff+dt.timedelta(seconds=90)).isoformat() if report['all_rows'] else now.isoformat(),
             'status': report['status'],
-            'summary': f"采样{report['sampled_at']}；{report.get('flow_label', '行业资金')}；"+(f"参考覆盖{report['coverage'].get('reference_records', 0)}/{report['coverage']['expected']}，实时资格0。" if reference else f"行业资金有效{report['coverage']['valid_funds']}/{report['coverage']['expected'] if report['coverage']['expected'] is not None else '全集未知'}。")+report['scope']+'。'+report['method'],
+            'summary': f"采样{report['sampled_at']}；{report.get('flow_label', '行业资金')}；"+(f"{coverage_label}{report['coverage'].get('reference_records', 0)}/{report['coverage']['expected']}，{quality_label}。" if reference else f"行业资金有效{report['coverage']['valid_funds']}/{report['coverage']['expected'] if report['coverage']['expected'] is not None else '全集未知'}。")+report['scope']+'。'+report['method'],
             'changes': changes, 'directions': rows, 'missing': report['missing'],
             'sources': [{'label': report.get('flow_label', '东方财富行业资金'), 'url': report.get('source_url', SOURCE),
                          'published_at': cutoff.isoformat() if times else '未取得源资金时间',
-                         'observation_period': '同一来源累计及连续30分钟；参考与实时分开', 'retrieved_at': now.isoformat()}]+
+                         'observation_period': '同花顺原生资金快照；行情归属日及资金时刻未提供' if report.get('provider') == 'ths' else '同一来源累计及连续30分钟；参考与实时分开', 'retrieved_at': now.isoformat()}]+
                        [dict(s, published_at='原站说明', observation_period='资金统计定义与延迟', retrieved_at=now.isoformat()) for s in report.get('extra_sources', [])]}
 
 
@@ -596,25 +669,48 @@ def run_lock():
         yield
 
 
-def run(*, now=None, feed=None, scheduled=False, no_page=False):
+def run(*, now=None, feed=None, scheduled=False, no_page=False,
+        reference_refresh=False, ths_collector=None):
     actual = stamp(now) if now is not None else dt.datetime.now(TZ)
-    context = schedule_context(actual, scheduled)
+    if reference_refresh and scheduled:
+        raise ValueError('盘后按需参考不能冒充定时时点采样')
+    if reference_refresh:
+        _, reason = is_trading_day(actual.date())
+        context = {'run': True, 'slot': None, 'calendar_note': reason}
+        if '缺少' in reason or '不可用' in reason:
+            context['error'] = reason
+    else:
+        context = schedule_context(actual, scheduled)
     if not context['run']:
         return {'status': 'skipped', 'notify': False, 'reason': context['reason']}
     with run_lock():
         if context.get('slot'):
             slots = read_json(folder()/'slots.json', {})
             previous_slot = slots.get(context['slot'])
-            if previous_slot and (isinstance(previous_slot, str) or previous_slot.get('status') == 'complete' or previous_slot.get('ranking_complete') is True):
+            current_provider = 'eastmoney' if feed is not None else 'ths'
+            if previous_slot and ((isinstance(previous_slot, str) and current_provider == 'eastmoney') or
+                    (isinstance(previous_slot, dict) and
+                    (previous_slot.get('provider', 'eastmoney') == current_provider and
+                     (current_provider != 'ths' or previous_slot.get('source_policy') == SOURCE_POLICY) and
+                     (previous_slot.get('status') == 'complete' or previous_slot.get('ranking_complete')
+                      or previous_slot.get('reference_complete'))))):
                 previous_version = previous_slot if isinstance(previous_slot, str) else previous_slot['edition']
                 return {'status': 'duplicate', 'notify': False, 'reason': '本半小时槽已成功采样', 'edition': previous_version}
-        if context.get('error'):
+        if feed is None:
+            report, raw = collect_ths_only(actual, slot=context['slot'],
+                clock=None if now is not None else lambda: dt.datetime.now(TZ),
+                collector=ths_collector, error=context.get('error'))
+        elif context.get('error'):
             report, raw = collect(actual, _BrokenFeed(context['error']), slot=context['slot'],
                                   clock=None if now is not None else lambda: dt.datetime.now(TZ))
         else:
             report, raw = collect_with_fallback(actual, feed=feed, slot=context['slot'],
                                   clock=None if now is not None else lambda: dt.datetime.now(TZ))
         report['changes'] = compare_previous(report, read_json(folder()/'current.json', {}))
+        if reference_refresh:
+            report['execution_phase'] = 'manual-reference'
+            report['calendar_note'] = context['calendar_note']
+            report['transport_notes'].append('本轮为按需原生参考刷新，采集时间如实记录，不回填任何定时时点。')
         result = publish(report, raw)
     result['status'] = report['status']
     if not no_page and result.get('changed'):
@@ -644,6 +740,8 @@ def mark_sent(version):
         state.setdefault('sent', {})[version] = {'sampled_at': report['sampled_at'], 'slot': report.get('slot'),
                                                'ranking_complete': report.get('ranking_complete', False),
                                                'reference_complete': report.get('reference_complete', False),
+                                               'provider': report.get('provider'),
+                                               'source_policy': report.get('source_policy'),
                                                'recorded_at': dt.datetime.now(TZ).isoformat()}
         state['fault_signature'] = report['failure_signature'] if report['status'] != 'complete' else None
         atomic_json(folder()/'delivery.json', state)
@@ -651,23 +749,31 @@ def mark_sent(version):
 
 def markdown(report):
     reference = report.get('reference_only', False)
+    coverage_label = '原站前十覆盖' if report.get('coverage_kind') == 'publisher_top10' else '参考覆盖'
     lines = [f"**行业资金雷达 · {report['sampled_at']}**", '',
              report.get('flow_label', '东方财富行业主力净额')+'；'+report['scope']+'。', '',
-             (f"参考覆盖：{report['coverage'].get('reference_records', 0)}/{report['coverage']['expected']}；实时榜尚未恢复。" if reference else f"覆盖：{report['coverage']['valid_funds']}/{report['coverage']['expected'] if report['coverage']['expected'] is not None else '全集未知'}；状态：{report['status']}。"), '']
+             (f"{coverage_label}：{report['coverage'].get('reference_records', 0)}/{report['coverage']['expected']}；资金自身时点未知。" if reference and report.get('provider') == 'ths' else f"参考覆盖：{report['coverage'].get('reference_records', 0)}/{report['coverage']['expected']}；实时榜尚未恢复。" if reference else f"覆盖：{report['coverage']['valid_funds']}/{report['coverage']['expected'] if report['coverage']['expected'] is not None else '全集未知'}；状态：{report['status']}。"), '']
     if reference:
         lines += [report['reference_limit']]
         lag = report.get('reference_lag_seconds')
         if lag:
             lines += [f"本轮资金自身时间落后实际采样{lag['min']:.0f}—{lag['max']:.0f}秒。"]
-        lines += ['',
-                  '|参考名次|行业|累计资金净额|同场30分钟净额|涨幅|资金自身时间|',
-                  '|---:|---|---:|---:|---:|---|']
+        ths = report.get('provider') == 'ths'
+        if ths:
+            lines += ['资金自身日期与时刻：原站未提供；采集时间不代表行情时间。', '',
+                      '|原站名次|行业|原生资金净额|涨幅|', '|---:|---|---:|---:|']
+        else:
+            lines += ['', '|参考名次|行业|累计资金净额|同场30分钟净额|涨幅|资金自身时间|',
+                      '|---:|---|---:|---:|---:|---|']
         for r in report['reference_top10']:
             source = r.get('source_time')
             time_label = source[11:19] if source else '原站未提供'
-            lines.append(f"|{r['rank']}|{r['name']}|{amount(r['main_cny'])}|{amount(r['delta_30m_cny'])}|{r['change_pct']:+.2f}%|{time_label}|")
+            change = '缺失' if r.get('change_pct') is None else f"{r['change_pct']:+.2f}%"
+            lines.append(f"|{r['rank']}|{r['name']}|{amount(r['main_cny'])}|{change}|" if ths else
+                         f"|{r['rank']}|{r['name']}|{amount(r['main_cny'])}|{amount(r['delta_30m_cny'])}|{change}|{time_label}|")
     elif not report['ranking_complete']:
-        lines.append('未取得完整同期行业资金，暂不发布全市场前十及优先关注排名。')
+        lines.append('未取得同花顺原站前十，本轮不发布新榜。' if report.get('source_policy') == SOURCE_POLICY else
+                     '未取得完整同期行业资金，暂不发布全市场前十及优先关注排名。')
     if report['top10']:
         lines += ['|排名（较上轮）|行业|当日累计净额|同场30分钟增量|涨幅|成交额|盘口原生净占比|源资金时间|',
                   '|---:|---|---:|---:|---:|---:|---:|---|']
@@ -681,7 +787,7 @@ def markdown(report):
         lines += ['', '**优先复核方向**（按30分钟净增额排序）']
         for r in report['attention_top3']:
             lines.append(f"{r['attention_rank']}. {r['name']}：30分钟{amount(r['delta_30m_cny'])}，累计{amount(r['main_cny'])}，涨幅{r['change_pct']:+.2f}%。")
-    elif not reference:
+    elif not reference and report.get('source_policy') != SOURCE_POLICY:
         lines += ['', '关注前三暂空：窗口积累或同刻证据不足时继续等待。']
     if report.get('changes', {}).get('available'):
         lines += ['', '新入前十：'+('、'.join(report['changes']['new']) or '无')+'；退出前十：'+('、'.join(report['changes']['out']) or '无')+'。']
@@ -697,13 +803,16 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--run', action='store_true')
     parser.add_argument('--scheduled', action='store_true')
+    parser.add_argument('--refresh-reference', action='store_true',
+                        help='按需刷新同花顺原生参考，允许盘后；不回填定时时点')
     parser.add_argument('--no-page', action='store_true')
     parser.add_argument('--markdown', action='store_true')
     parser.add_argument('--decision', action='store_true')
     parser.add_argument('--mark-sent')
     args = parser.parse_args()
     if args.run:
-        print(json.dumps(run(scheduled=args.scheduled, no_page=args.no_page), ensure_ascii=False))
+        print(json.dumps(run(scheduled=args.scheduled, no_page=args.no_page,
+                             reference_refresh=args.refresh_reference), ensure_ascii=False))
     else:
         report = read_json(folder()/'current.json')
         if not report:

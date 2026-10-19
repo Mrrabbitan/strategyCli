@@ -261,7 +261,8 @@ def render_topics(*, now=None, exclude=()):
             sections.append(render_topic(data, now))
             continue
         kind = data.get('as_of_kind', 'market')
-        state = ('延迟资金参考快照，不作为实时信号' if kind == 'delayed' else
+        state = ('本轮资料不可用，未发布新结果' if data['status'] == 'unavailable' else
+                 '延迟资金参考快照，不作为实时信号' if kind == 'delayed' else
                  '资金时点未知的参考快照，不作为实时信号' if kind == 'capture' else
                  '观察窗口已结束，以下仅为历史研究' if stamp(data['valid_until']) < now else
                  '资料不足，等待核验' if data['status'] != 'complete' else '本轮专题研究已完成')

@@ -178,6 +178,104 @@ def collect_ths_snapshot(*, session=None, timeout: float = 8, max_pages: int = 4
     }
 
 
+def parse_ths_published_top10(html: str) -> dict:
+    """Read the publisher's inflow chart list, never infer a full universe.
+
+    The site's companion chart script labels JS_DATA's nonnegative/negative
+    groups as net-inflow/net-outflow top ten. JS_DATA normally has 20 entries;
+    that is a publisher shortlist, not the entire industry catalogue. Auxiliary
+    quotes are joined only from the table in this exact response.
+    """
+    parsed = parse_ths_page(html)
+    chart, table = parsed['chart'], parsed['rows']
+    if parsed['page'] != 1:
+        raise ValueError('同花顺原站榜要求第一页原生表及图表')
+    if sorted(row['page_rank'] for row in table) != list(range(1, len(table)+1)):
+        raise ValueError('同花顺原站榜辅助表序号不连续')
+    if any(not re.fullmatch(r'881\d{3}', x['code']) or
+           not isinstance(x['name'], str) or not x['name'].strip() for x in chart):
+        raise ValueError('同花顺原站图表行业代码或名称无效')
+    incoming = [x for x in chart if x['net_cny'] >= 0]
+    outgoing = [x for x in chart if x['net_cny'] < 0]
+    if len(chart) > 20 or len(incoming) > 10 or len(outgoing) > 10:
+        raise ValueError('同花顺原站前十图表数量或正负分组异常')
+    if not incoming:
+        raise ValueError('同花顺原站图中未取得可核验净流入项')
+    by_code = {row['code']: row for row in table}
+    # Check every overlap, including outflow entries that will not be displayed.
+    for item in chart:
+        auxiliary = by_code.get(item['code'])
+        if auxiliary is not None and (auxiliary['name'] != item['name'] or
+                abs(auxiliary['net_cny']-item['net_cny']) > 1000000):
+            raise ValueError('同花顺同一响应表与图表身份或净额不一致')
+    rows = []
+    for item in incoming:
+        auxiliary = by_code.get(item['code'])
+        row = {'code': item['code'], 'name': item['name'], 'net_cny': item['net_cny'],
+               'fund_source_time': None, 'change_pct': None, 'index': None,
+               'inflow_cny': None, 'outflow_cny': None, 'company_count': None,
+               'auxiliary_available': auxiliary is not None}
+        if auxiliary is not None:
+            row.update({k: auxiliary[k] for k in ('change_pct', 'index',
+                       'inflow_cny', 'outflow_cny', 'company_count')})
+        rows.append(row)
+    # Preserve the publisher's order, including ties. A changed native ordering
+    # is a schema/definition change to investigate, not permission to re-rank.
+    if any(b['net_cny'] > a['net_cny'] for a, b in zip(rows, rows[1:])):
+        raise ValueError('同花顺原站净流入前十顺序异常，不自行重排')
+    ordered = rows
+    return {
+        'provider': '同花顺', 'classification': '同花顺行业',
+        'status': 'reference_only', 'reference_only': True,
+        'time_quality': 'unknown_reference', 'coverage_complete': False,
+        'universe_complete': False, 'coverage_kind': 'publisher_top10',
+        'publisher_list_verified': True, 'publisher_limit': 10,
+        'published_top10_complete': len(ordered) == 10,
+        'expected_count': 10, 'industry_expected_count': None,
+        'received_count': len(ordered),
+        'chart_count': len(chart), 'table_count': len(table),
+        'publisher_inflow_count': len(incoming), 'publisher_outflow_count': len(outgoing),
+        'auxiliary_count': sum(x['auxiliary_available'] for x in ordered),
+        'displayed_total_pages': parsed['total_pages'],
+        'coverage_basis': '单响应原站JS_DATA净流入前十及净流出前十图示；expected_count=10仅指原站前十目标项数，未取得完整行业池，没有api.total字段',
+        'publisher_definition': '原站配套资金图脚本tooltip标注“资金净流入/流出前10”；未自行重算全行业排名',
+        'definition_url': 'https://s.thsi.cn/website/datacenter/funds/zjlx_v1.20260305.js',
+        'fund_metric': '原站流入资金减流出资金；未标为大单主力净额',
+        'native_unit': '亿元', 'normalized_unit': '元',
+        'fund_source_time': None, 'half_hour_available': False,
+        'limitation': '同花顺原站发布净流入前十参考；资金自身日期和时点未知，完整行业池未拉取；辅助仅取同一响应匹配记录，不足十项不补位',
+        'rows': ordered, 'top10': ordered,
+    }
+
+
+def collect_ths_published_top10(*, session=None, timeout: float = 5,
+                               raw_sink=None, now=None) -> dict:
+    """One ordinary public GET, no challenge handling, retries or page mixing."""
+    if not 0 < timeout <= 15:
+        raise ValueError('同花顺请求限制无效')
+    if session is None:
+        import requests
+        session = requests.Session()
+    url = THS_URL.format(page=1)
+    response = session.get(url, timeout=timeout,
+                           headers={'User-Agent': 'Mozilla/5.0'})
+    response.encoding = 'gbk'
+    retrieved = (now or dt.datetime.now(TZ)).astimezone(TZ).isoformat()
+    body = response.text
+    fingerprint = hashlib.sha256(body.encode('utf-8')).hexdigest()
+    record = {'provider': 'ths', 'kind': 'ths-published-top10', 'url': url,
+              'source_url': url, 'retrieved_at': retrieved,
+              'status': response.status_code, 'headers': dict(response.headers),
+              'body': body, 'source_fingerprint': fingerprint}
+    if raw_sink:
+        raw_sink(record)
+    response.raise_for_status()
+    result = parse_ths_published_top10(body)
+    result.update(retrieved_at=retrieved, source_urls=[url],
+                  input_fingerprint=fingerprint)
+    return result
+
+
 def _session(moment):
     value = moment.time().replace(tzinfo=None)
     if dt.time(9, 30) <= value <= dt.time(11, 30):

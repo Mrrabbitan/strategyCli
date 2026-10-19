@@ -5,7 +5,8 @@ import time
 import unittest
 
 from sector_fund_alternative import (collect_ths_snapshot, parse_ths_page,
-    collect_sina_snapshot, parse_sina_minutes, SINA_COUNT, SINA_LIST, TZ)
+    collect_sina_snapshot, parse_sina_minutes, SINA_COUNT, SINA_LIST, TZ,
+    parse_ths_published_top10, collect_ths_published_top10)
 
 
 def page(number=1, total=2, *, code=None, rank=None, net=None, chart=None):
@@ -41,6 +42,16 @@ class Session:
     def get(self, *args, **kwargs):
         self.calls += 1
         return Response(self.pages[self.calls-1])
+
+
+def publisher_chart(inflows=10, outflows=10):
+    return ([dict(name='虚构甲' if i == 0 else '虚构流入'+str(i),
+                  amount=float((30-i)/100),
+                  addr='http://q.10jqka.com.cn/thshy/detail/code/'+str(881901+i)+'/')
+             for i in range(inflows)]+
+            [dict(name='虚构流出'+str(i), amount=-(i+1)/100,
+                  addr='http://q.10jqka.com.cn/thshy/detail/code/'+str(881951+i)+'/')
+             for i in range(outflows)])
 
 
 class AlternativeTests(unittest.TestCase):
@@ -86,6 +97,71 @@ class AlternativeTests(unittest.TestCase):
                    dict(name='虚构乙', amount=-.2, addr='http://q.10jqka.com.cn/thshy/detail/code/881902/')]
         with self.assertRaisesRegex(ValueError, '截面变化'):
             collect_ths_snapshot(session=Session([page(), page(2, chart=changed)]))
+
+    def test_publisher_list_keeps_auxiliary_gaps_and_unknown_full_universe(self):
+        report = parse_ths_published_top10(page(chart=publisher_chart()))
+        self.assertEqual(report['received_count'], 10)
+        self.assertEqual(report['auxiliary_count'], 1)
+        self.assertEqual(report['table_count'], 1)
+        self.assertTrue(report['reference_only'])
+        self.assertFalse(report['universe_complete'])
+        self.assertFalse(report['coverage_complete'])
+        self.assertEqual(report['expected_count'], 10)
+        self.assertIsNone(report['industry_expected_count'])
+        self.assertTrue(report['published_top10_complete'])
+        self.assertEqual(report['coverage_kind'], 'publisher_top10')
+        self.assertEqual(report['time_quality'], 'unknown_reference')
+        self.assertIsNone(report['fund_source_time'])
+        self.assertFalse(report['half_hour_available'])
+        self.assertEqual(report['rows'][0]['change_pct'], -1.2)
+        for key in ('change_pct', 'inflow_cny', 'outflow_cny', 'index', 'company_count'):
+            self.assertIsNone(report['rows'][1][key])
+        self.assertEqual(report['rows'][1]['net_cny'], 29000000)
+        self.assertTrue(all(x['net_cny'] >= 0 for x in report['rows']))
+        self.assertEqual(report['publisher_outflow_count'], 10)
+        self.assertIn('没有api.total', report['coverage_basis'])
+
+    def test_publisher_rejects_chart_table_conflict_or_duplicates(self):
+        mismatch = publisher_chart()
+        mismatch[0]['amount'] = .5
+        with self.assertRaisesRegex(ValueError, '不一致'):
+            parse_ths_published_top10(page(chart=mismatch))
+        duplicate = [dict(name='虚构甲', amount=.3, addr='http://q.10jqka.com.cn/thshy/detail/code/881901/')]*2
+        with self.assertRaisesRegex(ValueError, '重复'):
+            parse_ths_published_top10(page(chart=duplicate))
+
+    def test_publisher_order_change_is_rejected_not_locally_repaired(self):
+        chart = publisher_chart()
+        chart[2], chart[3] = chart[3], chart[2]
+        with self.assertRaisesRegex(ValueError, '顺序异常'):
+            parse_ths_published_top10(page(chart=chart))
+
+    def test_publisher_short_list_never_fills_negative_rows_or_fourth_party_data(self):
+        report = parse_ths_published_top10(page(chart=publisher_chart(inflows=8)))
+        self.assertEqual(report['received_count'], 8)
+        self.assertEqual(len(report['top10']), 8)
+        self.assertFalse(report['universe_complete'])
+        self.assertFalse(report['published_top10_complete'])
+        negative_only = publisher_chart(inflows=0)
+        with self.assertRaisesRegex(ValueError, '未取得'):
+            parse_ths_published_top10(page(chart=negative_only))
+
+    def test_publisher_wrong_group_counts_and_js20_cannot_be_entire_pool(self):
+        with self.assertRaisesRegex(ValueError, '数量'):
+            parse_ths_published_top10(page(chart=publisher_chart(inflows=11)))
+        with self.assertRaisesRegex(ValueError, '数量'):
+            parse_ths_published_top10(page(chart=publisher_chart(outflows=11)))
+        with self.assertRaisesRegex(ValueError, '唯一代码'):
+            collect_ths_snapshot(session=Session([page(chart=publisher_chart()),
+                                                  page(2, chart=publisher_chart())]))
+
+    def test_single_collector_uses_exactly_one_response_and_no_http_clock(self):
+        session, raw = Session([page(chart=publisher_chart())]), []
+        report = collect_ths_published_top10(session=session, raw_sink=raw.append)
+        self.assertEqual(session.calls, 1)
+        self.assertEqual(len(raw), 1)
+        self.assertIsNone(report['fund_source_time'])
+        self.assertEqual(report['auxiliary_count'], 1)
 
 
 NOW = dt.datetime(2026, 10, 19, 10, 30, 20, tzinfo=TZ)

@@ -82,6 +82,13 @@ class TopicTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             publish_topic(data, now=self.now)
 
+    def test_unavailable_capture_does_not_claim_reference_snapshot_ready(self):
+        data = dict(self.data, status='unavailable', as_of_kind='capture')
+        publish_topic(data, now=self.now)
+        text = render_topics(now=self.now)
+        self.assertIn('本轮资料不可用，未发布新结果', text)
+        self.assertNotIn('资金时点未知的参考快照', text)
+
     def test_malformed_url_is_isolated_from_other_topics(self):
         from research_store import atomic_json
         publish_topic(self.data, now=self.now)

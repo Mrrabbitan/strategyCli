@@ -354,5 +354,71 @@ class PulseTests(unittest.TestCase):
         self.assertTrue((pulse.folder()/'last_reference.json').exists())
 
 
+    def _published_ths(self):
+        return dict(provider='同花顺', coverage_kind='publisher_top10',
+                    published_top10_complete=True, expected_count=10,
+                    universe_complete=False, coverage_complete=False,
+                    fund_metric='原站普通资金净额，未注明主力', limitation='资金时点未知，仅原生参考',
+                    coverage_basis='单响应原站发布前十，非全行业池',
+                    source_urls=['https://example.invalid/ths'],
+                    rows=[dict(code=f'8819{i:02d}',name=f'人工行业{i}',net_cny=(10-i)*1e8,
+                               change_pct=None if i==0 else 1.0) for i in range(10)])
+
+    def test_default_run_uses_only_ths_published_list(self):
+        calls=[]
+        def ths(**kwargs):
+            calls.append(1)
+            return self._published_ths()
+        with patch.object(pulse, 'collect', side_effect=AssertionError('不可调用东财')):
+            with patch.object(pulse, 'collect_with_fallback', side_effect=AssertionError('不可切换来源')):
+                out=pulse.run(now=NOW,scheduled=True,no_page=True,ths_collector=ths)
+                self.assertTrue(out['notify'])
+                again=pulse.run(now=NOW,scheduled=True,no_page=True,ths_collector=ths)
+        self.assertEqual(len(calls),1)
+        self.assertEqual(again['status'],'duplicate')
+        r=pulse.read_json(pulse.folder()/'current.json')
+        self.assertEqual(r['provider'],'ths')
+        self.assertEqual(r['source_policy'],'ths-only')
+        self.assertFalse(r['universe_complete'])
+        self.assertFalse(r['ranking_complete'])
+        self.assertEqual(len(r['reference_top10']),10)
+        self.assertEqual(r['attention_top3'],[])
+        self.assertIn('原站前十覆盖：10/10',pulse.markdown(r))
+        self.assertIn('缺失',pulse.markdown(r))
+        self.assertNotIn('同场30分钟净额|',pulse.markdown(r))
+        self.assertIn('未拉取全行业池',pulse.topic(r)['summary'])
+
+    def test_ths_failure_does_not_substitute_or_return_empty_success(self):
+        def unavailable(**kwargs):
+            raise ValueError('人工401访问挑战；停止')
+        with patch.object(pulse,'collect_with_fallback',side_effect=AssertionError('不能换源')):
+            r,_=pulse.collect_ths_only(NOW,collector=unavailable)
+        self.assertEqual(r['status'],'unavailable')
+        self.assertFalse(r.get('reference_complete',False))
+        self.assertEqual(r['provider'],'ths')
+        self.assertEqual(r['reference_top10'] if 'reference_top10' in r else [],[])
+        self.assertIn('401',r['missing'][0])
+
+    def test_manual_reference_after_close_never_claims_scheduled_time(self):
+        after=NOW.replace(hour=16)
+        self.assertFalse(pulse.run(now=after,scheduled=True,no_page=True)['notify'])
+        result=pulse.run(now=after,reference_refresh=True,no_page=True,
+                         ths_collector=lambda **kwargs:self._published_ths())
+        self.assertTrue(result['notify'])
+        r=pulse.read_json(pulse.folder()/'current.json')
+        self.assertIsNone(r['slot'])
+        self.assertEqual(r['sampled_at'],after.isoformat())
+        self.assertEqual(r['execution_phase'],'manual-reference')
+        self.assertEqual(pulse.topic(r)['as_of_kind'],'capture')
+        with self.assertRaises(ValueError):
+            pulse.run(now=after,reference_refresh=True,scheduled=True,no_page=True)
+
+    def test_publisher_list_missing_item_does_not_become_full_top10(self):
+        snapshot=self._published_ths(); snapshot['rows'].pop()
+        r,_=pulse.collect_ths_only(NOW,collector=lambda **kwargs:snapshot)
+        self.assertEqual(r['status'],'unavailable')
+        self.assertFalse(r.get('reference_complete',False))
+
+
 if __name__ == '__main__':
     unittest.main()
