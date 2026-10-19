@@ -274,5 +274,85 @@ class PulseTests(unittest.TestCase):
         self.assertEqual(sum(r['status']=='duplicate' for r in results), 1)
 
 
+    def _sina_reference(self, now=NOW):
+        row = pulse.inspect_industry(quote(), minutes(), NOW, 'https://example.invalid')
+        row.update(code='new_fake', name='虚构延迟行业', source_time=(now-dt.timedelta(minutes=5)).isoformat(),
+                   quote_time=(now-dt.timedelta(minutes=5)).isoformat(), provider='sina', reference_only=True)
+        return dict(provider='sina', rows=[row], raw=[], universe_complete=True,
+                    expected_count=1, universe_fingerprint='artificial', missing=[],
+                    scope='虚构新浪行业全集', source_url='https://example.invalid/sina')
+
+    def _ths_reference(self):
+        return dict(provider='同花顺', coverage_complete=True, expected_count=1,
+                    fund_metric='原生流入减流出，未标主力', limitation='资金自身时点未知，仅供参考',
+                    rows=[dict(code='881999', name='虚构时点未知行业', net_cny=2e8, change_pct=1.2)],
+                    source_urls=['https://example.invalid/ths'])
+
+    def test_provider_switch_never_compares_rank_changes(self):
+        report, _ = pulse.collect(NOW, FakeFeed())
+        old = copy.deepcopy(report)
+        old['provider'] = 'sina'
+        old['sampled_at'] = (NOW-dt.timedelta(minutes=30)).isoformat()
+        old['all_rows'][0]['source_time'] = old['sampled_at']
+        self.assertFalse(pulse.compare_previous(report, old)['available'])
+
+    def test_complete_delayed_reference_never_promotes_live(self):
+        report, _ = pulse.collect_with_fallback(NOW, feed=FakeFeed(fail=True),
+            sina_collector=lambda *a, **k: self._sina_reference(),
+            ths_collector=lambda **k: self.fail('不应继续取同花顺'))
+        self.assertTrue(report['reference_complete'])
+        self.assertFalse(report['ranking_complete'])
+        self.assertEqual(report['attention_top3'], [])
+        self.assertEqual(report['top10'], [])
+        self.assertEqual(report['coverage']['valid_funds'], 0)
+        self.assertEqual(report['reference_top10'][0]['main_cny'], 1e8)
+        self.assertIn('延迟参考', pulse.markdown(report))
+        from research_topics import validate
+        validate(pulse.topic(report), NOW)
+        self.assertEqual(pulse.topic(report)['valid_until'], NOW.isoformat())
+
+    def test_sina_inconsistent_times_fall_back_to_unknown_time_reference(self):
+        snapshot = self._sina_reference()
+        row = copy.deepcopy(snapshot['rows'][0])
+        row.update(code='new_fake2', source_time=(NOW-dt.timedelta(minutes=8)).isoformat())
+        snapshot.update(rows=snapshot['rows']+[row], expected_count=2)
+        report, _ = pulse.collect_with_fallback(NOW, feed=FakeFeed(fail=True),
+            sina_collector=lambda *a, **k: snapshot,
+            ths_collector=lambda **k: self._ths_reference())
+        self.assertEqual(report['provider'], 'ths')
+        self.assertIsNone(report['reference_top10'][0]['source_time'])
+        self.assertIsNone(report['reference_top10'][0]['delta_30m_cny'])
+        text = pulse.markdown(report)
+        self.assertIn('原站未提供', text)
+        self.assertNotIn('当日累计主力', text)
+        self.assertEqual(pulse.topic(report)['sources'][0]['published_at'], '未取得源资金时间')
+
+    def test_partial_reference_pool_does_not_become_full_ranking(self):
+        snapshot = self._sina_reference()
+        snapshot['expected_count'] = 2
+        def missing_ths(**kwargs):
+            raise ValueError('人工备用中断')
+        report, _ = pulse.collect_with_fallback(NOW, feed=FakeFeed(fail=True),
+            sina_collector=lambda *a, **k: snapshot, ths_collector=missing_ths)
+        self.assertEqual(report['status'], 'unavailable')
+        self.assertEqual(report['top10'], [])
+        self.assertFalse(report.get('reference_complete', False))
+        self.assertEqual(report['coverage']['failed_funds'], report['coverage']['expected'])
+
+    def test_reference_slot_receipts_and_new_slot_are_independent(self):
+        report, raw = pulse.collect_with_fallback(NOW, slot=NOW.isoformat(), feed=FakeFeed(fail=True),
+            sina_collector=lambda *a, **k: self._sina_reference(),
+            ths_collector=lambda **k: self._ths_reference())
+        first = pulse.publish(report, raw)
+        pulse.mark_sent(first['edition'])
+        again = copy.deepcopy(report)
+        again['sampled_at'] = (NOW+dt.timedelta(seconds=10)).isoformat()
+        self.assertFalse(pulse.decision(again)['notify'])
+        again['slot'] = (NOW+dt.timedelta(minutes=30)).isoformat()
+        self.assertTrue(pulse.decision(again)['notify'])
+        self.assertFalse((pulse.folder()/'last_success.json').exists())
+        self.assertTrue((pulse.folder()/'last_reference.json').exists())
+
+
 if __name__ == '__main__':
     unittest.main()

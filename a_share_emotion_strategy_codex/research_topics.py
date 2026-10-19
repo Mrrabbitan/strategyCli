@@ -79,6 +79,8 @@ def validate(data, now):
         raise ValueError('Invalid topic information cutoff')
     if data.get('status') not in ('complete', 'partial', 'unavailable'):
         raise ValueError('Invalid topic status')
+    if data.get('as_of_kind', 'market') not in ('market', 'capture', 'delayed'):
+        raise ValueError('Invalid topic clock kind')
     if data.get('related_module') not in (None, *RELATED_MODULES):
         raise ValueError('Invalid related module')
     related = data.get('related_modules', [])
@@ -258,7 +260,10 @@ def render_topics(*, now=None, exclude=()):
             from late_day_research import render_topic
             sections.append(render_topic(data, now))
             continue
-        state = ('观察窗口已结束，以下仅为历史研究' if stamp(data['valid_until']) < now else
+        kind = data.get('as_of_kind', 'market')
+        state = ('延迟资金参考快照，不作为实时信号' if kind == 'delayed' else
+                 '资金时点未知的参考快照，不作为实时信号' if kind == 'capture' else
+                 '观察窗口已结束，以下仅为历史研究' if stamp(data['valid_until']) < now else
                  '资料不足，等待核验' if data['status'] != 'complete' else '本轮专题研究已完成')
         rows = ''.join('<tr>' + ''.join(f'<td>{escape(row[k])}</td>' for k in
                        ('name', 'industry_state', 'market_state', 'evidence', 'counter', 'next')) + '</tr>'
@@ -268,9 +273,11 @@ def render_topics(*, now=None, exclude=()):
         sources = _source_links(data.get('sources', []))
         information = (f' · 资料核验截至 {escape(data["information_as_of"])}（盘后资料不倒填行情判断）'
                        if data.get('information_as_of') else '')
+        cutoff_label = {'capture': '采集截至（资金自身时点未知）',
+                        'delayed': '延迟资金截至', 'market': '行情截止'}[data.get('as_of_kind', 'market')]
         sections.append(f'''<section class="playbook" id="topic-{escape(data['topic_id'])}">
 <h2>{escape(data['title'])}</h2><p class="notice">{state}。静态专题不授予交易资格。</p>
-<p>行情截止 {escape(data['as_of'])}{information} · 本次计算 {escape(data['generated_at'])} · 观察期限 {escape(data['valid_until'])}</p>
+<p>{cutoff_label} {escape(data['as_of'])}{information} · 本次计算 {escape(data['generated_at'])} · 观察期限 {escape(data['valid_until'])}</p>
 <p>{escape(data['summary'])}</p><h3>相较上次的变化</h3><ul>{changes}</ul>
 {_render_decision_tiers(data)}
 <div style="overflow-x:auto"><table><thead><tr><th>方向</th><th>产业状态</th><th>市场状态</th><th>依据</th><th>反证与缺口</th><th>下一步</th></tr></thead><tbody>{rows}</tbody></table></div>
@@ -295,7 +302,9 @@ def render_topic_links(module, *, now=None):
         if module not in related:
             continue
         status = '历史研究' if stamp(data['valid_until']) < now else '独立观察研究'
+        cutoff_label = {'capture': '采集截至（资金自身时点未知）',
+                        'delayed': '延迟资金截至', 'market': '行情截止'}[data.get('as_of_kind', 'market')]
         links.append(f'<li><a href="#topic-{data["topic_id"]}">{html.escape(data["title"])}</a>'
-                     f' · {status} · 行情截止 {html.escape(data["as_of"])}</li>')
+                     f' · {status} · {cutoff_label} {html.escape(data["as_of"])}</li>')
     return ('<aside class="playbook"><h3>相关专题</h3><p>观察比较与本策略核心资格分别核验。</p><ul>'
             + ''.join(links) + '</ul></aside>') if links else ''

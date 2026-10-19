@@ -68,6 +68,20 @@ class TopicTests(unittest.TestCase):
         publish_topic(data, now=self.now)
         self.assertIn('原取得时间未记录', render_topics(now=self.now))
 
+    def test_capture_and_delayed_clock_labels_do_not_claim_live_market_cutoff(self):
+        data = copy.deepcopy(self.data)
+        data['as_of_kind'] = 'capture'
+        publish_topic(data, now=self.now)
+        page = render_topics(now=self.now)
+        self.assertIn('采集截至（资金自身时点未知）', page)
+        self.assertNotIn('行情截止', page)
+        data['as_of_kind'] = 'delayed'
+        publish_topic(data, now=self.now)
+        self.assertIn('延迟资金截至', render_topics(now=self.now))
+        data['as_of_kind'] = '<script>'
+        with self.assertRaises(ValueError):
+            publish_topic(data, now=self.now)
+
     def test_malformed_url_is_isolated_from_other_topics(self):
         from research_store import atomic_json
         publish_topic(self.data, now=self.now)

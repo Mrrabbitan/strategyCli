@@ -1,4 +1,4 @@
-"""Bounded, read-only half-hour Eastmoney industry capital-flow research.
+"""Bounded, read-only half-hour industry capital-flow research.
 
 No stock strategy is run. Actual sector constituents follow the vendor's whole
 A-share industry classification, including ChiNext/STAR stocks. Runtime evidence
@@ -24,7 +24,7 @@ from market_calendar import is_trading_day
 from research_store import atomic_json, read_json, research_path, update_lock
 
 TZ = ZoneInfo('Asia/Shanghai')
-VERSION = '1.0.0'
+VERSION = '1.1.0'
 SOURCE = 'https://data.eastmoney.com/bkzj/hy.html'
 SCOPE = 'm:90+t:2+f:!50'
 SLOTS = ('09:30', '10:00', '10:30', '11:00', '11:30',
@@ -104,7 +104,9 @@ def _fresh(source, now):
 
 class Feed:
     """Two read-only vendor entrances, 5 s per request and global deadline."""
-    def __init__(self, *, budget=70, timeout=5, hosts=HOSTS):
+    allow_web_fallback = True
+
+    def __init__(self, *, budget=35, timeout=5, hosts=HOSTS):
         self.deadline = time.monotonic() + budget
         self.timeout = timeout
         self.hosts = tuple(hosts)[:2]
@@ -114,8 +116,8 @@ class Feed:
         for host in self.hosts:
             remaining = self.deadline - time.monotonic()
             if remaining <= 0:
-                raise TimeoutError('本轮70秒采集预算用尽')
-            url = f'https://{host}/api/qt/{endpoint}?' + urlencode(params)
+                raise TimeoutError('本轮东财采集预算用尽')
+            url = f'https://{host}/api/qt/{endpoint}?' + urlencode(params, safe=',')
             try:
                 request = Request(url, headers={'User-Agent': 'Mozilla/5.0',
                                                 'Referer': 'https://quote.eastmoney.com/'})
@@ -269,7 +271,8 @@ def compare_previous(report, previous):
     if not previous or report['status'] != 'complete' or previous.get('status') != 'complete':
         return {'available': False, 'reason': '仅同日完整可比两轮显示变化'}
     now, old = stamp(report['sampled_at']), stamp(previous.get('sampled_at'))
-    if (old is None or old.date() != now.date() or not 0 < (now-old).total_seconds() <= 2700
+    if (report.get('provider', 'eastmoney') != previous.get('provider', 'eastmoney')
+            or old is None or old.date() != now.date() or not 0 < (now-old).total_seconds() <= 2700
             or session(old) != session(now) or report['universe_fingerprint'] != previous.get('universe_fingerprint')):
         return {'available': False, 'reason': '日期、时段、全集或45分钟比较窗口不匹配'}
     before = {r['code']: r for r in previous['all_rows']}
@@ -286,6 +289,7 @@ def compare_previous(report, previous):
 
 def collect(now, feed, *, slot=None, clock=None):
     raw, rows, failures = [], [], []
+    transport_notes = []
     universe = []
     complete = False
     started = time.monotonic()
@@ -293,7 +297,20 @@ def collect(now, feed, *, slot=None, clock=None):
         universe = collect_universe(feed, raw, clock=clock or (lambda: now))
         complete = True
     except Exception as exc:
-        failures.append('行业全集：' + str(exc))
+        native_error = '行业清单接口：' + str(exc)
+        if getattr(feed, 'allow_web_fallback', False):
+            raw.append({'kind': 'industry-list-failure', 'provider': 'eastmoney',
+                        'error': native_error,
+                        'retrieved_at': (stamp(clock()) if clock else now).isoformat()})
+            try:
+                from sector_fund_catalog import collect_web_universe
+                universe = collect_web_universe(feed, raw, clock=clock or (lambda: now))
+                complete = True
+                transport_notes.append('清单接口不可用，已使用两份一致的公开完整行业目录及独立报价；资金仍取东财原生分钟。')
+            except Exception as backup_exc:
+                failures.extend([native_error, '行业网页目录：' + str(backup_exc)])
+        else:
+            failures.append('行业全集：' + str(exc))
     if universe:
         pool = ThreadPoolExecutor(max_workers=6)
         def task(quote):
@@ -343,6 +360,9 @@ def collect(now, feed, *, slot=None, clock=None):
     full = bool(complete and len(rows) == len(universe) and top)
     status = 'complete' if full and all(r['quote_valid'] for r in rows) else 'partial' if rows else 'unavailable'
     report = {'schema_version': 1, 'module_id': 'sector-fund-pulse', 'rule_version': VERSION,
+        'provider': 'eastmoney', 'flow_label': '东方财富行业主力净额',
+        'flow_definition': '供应商大单与超大单净额之和，不代表真实账户持仓。',
+        'transport_notes': transport_notes,
         'started_at': now.isoformat(), 'sampled_at': finished.isoformat(), 'generated_at': finished.isoformat(), 'slot': slot,
         'scope': '东财全A股行业分类，含科创板与创业板成分；不是主板限定行业资金',
         'status': status, 'ranking_complete': full, 'universe_complete': complete,
@@ -360,6 +380,115 @@ def collect(now, feed, *, slot=None, clock=None):
     return report, raw
 
 
+def _reference_report(primary, snapshot, raw, finished):
+    """Keep alternative classifications and time quality outside live eligibility."""
+    report = dict(primary)
+    report['primary_attempt'] = {key: primary[key] for key in
+        ('provider', 'coverage', 'status', 'missing', 'raw_fingerprint')}
+    report.update(status='partial', ranking_complete=False, reference_only=True,
+                  reference_complete=True, sampled_at=finished.isoformat(),
+                  generated_at=finished.isoformat(), top10=[], attention_top3=[],
+                  all_rows=[], partial_reference=[], changes={'available': False},
+                  reference_attention_top3=[])
+    report['transport_notes'] = ['东财采集尝试：'+note for note in primary.get('transport_notes', [])]
+    if snapshot['provider'] == 'sina':
+        rows = snapshot['rows']
+        top, _, ordered, missing = rank_rows(rows,
+            expected_count=snapshot['expected_count'],
+            universe_complete=snapshot['universe_complete'])
+        if not top:
+            raise ValueError('新浪参考全集或资金时点跨度不足以形成完整参考榜')
+        ages = [(finished-stamp(r['source_time'])).total_seconds() for r in rows]
+        if any(not 0 <= age <= 900 for age in ages):
+            raise ValueError('新浪参考资金在最终发布前已过期或来自未来')
+        report.update(provider='sina', flow_label='新浪行业资金净额（延迟参考）',
+            flow_definition='主动买入及中性盘流入减主动卖出流出；不是东财大单主力净额。新浪说明普通资金数据延迟5—10分钟。',
+            time_quality='delayed_reference', scope=snapshot['scope'],
+            reference_top10=top, reference_rows=ordered,
+            reference_lag_seconds={'min': min(ages), 'max': max(ages)},
+            reference_limit='仅作延迟参考，资金自身时间最多落后15分钟；不授予实时榜或正式关注前三资格。',
+            universe_complete=True, universe_fingerprint=snapshot['universe_fingerprint'],
+            source_url=snapshot['source_url'],
+            coverage={'expected': snapshot['expected_count'], 'valid_funds': 0,
+                      'valid_quotes': 0, 'failed_funds': 0, 'reference_records': len(rows)},
+            missing=['东财实时完整榜未恢复；本表已切换为新浪独立分类及普通资金口径。',
+                     '新浪原生分钟没有成交额，不用流入加流出替代。']+missing,
+            extra_sources=[{'label': '新浪资金统计与延迟说明',
+                            'url': 'https://finance.sina.com.cn/temp/guest4377.shtml'}])
+    else:
+        rows = [dict(r, rank=i, main_cny=r['net_cny'], source_time=None,
+                     delta_30m_cny=None, turnover_cny=None, native_net_pct=None,
+                     quote_valid=False, quote_time=None,
+                     notes=['原站没有资金自身日期和时刻；同一表的涨幅亦不授予同期资格。'])
+                for i, r in enumerate(snapshot['rows'], 1)]
+        report.update(provider='ths', flow_label='同花顺行业资金净额（时点未知参考）',
+            flow_definition=snapshot['fund_metric'], time_quality='unknown_reference',
+            scope='同花顺完整行业分类，含其全部市场成分；不是东财分类或仅主板资金',
+            reference_top10=rows[:10], reference_rows=rows,
+            reference_limit=snapshot['limitation'], universe_complete=True,
+            universe_fingerprint=digest(sorted(r['code'] for r in rows)),
+            source_url=snapshot['source_urls'][0],
+            coverage={'expected': snapshot['expected_count'], 'valid_funds': 0,
+                      'valid_quotes': 0, 'failed_funds': 0, 'reference_records': len(rows)},
+            missing=['东财实时完整榜未恢复；本表为同花顺独立参考。',
+                     '同花顺没有资金自身日期或时刻：无法确认当日实时性、半小时增量或排名变化。'],
+            extra_sources=[])
+    report['method'] = '独立供应商完整行业表按原生累计净额降序；延迟或时点未知参考不作为实时资金转向结论。'
+    report['raw_fingerprint'] = digest(raw)
+    report['failure_signature'] = digest({'provider': report['provider'],
+        'time_quality': report['time_quality'], 'missing': report['missing']})
+    return report
+
+
+def collect_with_fallback(now, *, slot=None, clock=None, feed=None,
+                          sina_collector=None, ths_collector=None):
+    """Independent sources, bounded attempts. Never join rows across providers.
+
+    Explicit test feeds do not network to fallback providers unless collectors
+    are also injected. A failed primary attempt remains in the private report.
+    """
+    report, raw = collect(now, feed or Feed(), slot=slot, clock=clock)
+    if report['ranking_complete'] or (feed is not None and
+            sina_collector is None and ths_collector is None):
+        return report, raw
+    from sector_fund_alternative import collect_sina_snapshot, collect_ths_snapshot
+    sina_collector = sina_collector or collect_sina_snapshot
+    ths_collector = ths_collector or collect_ths_snapshot
+    failures = []
+    try:
+        snapshot = sina_collector(stamp(clock()) if clock else now,
+                                  clock=clock, max_age_seconds=900)
+        raw.extend(snapshot['raw'])
+        if snapshot['universe_complete'] and len(snapshot['rows']) == snapshot['expected_count']:
+            result = _reference_report(report, snapshot, raw,
+                                       stamp(clock()) if clock else now)
+            return result, raw
+        failures.append('新浪延迟参考覆盖'+str(len(snapshot['rows']))+'/'+str(snapshot['expected_count']))
+        raw.append({'kind': 'sina-reference-failure', 'missing': snapshot['missing']})
+    except Exception as exc:
+        failures.append('新浪延迟参考：'+str(exc))
+    try:
+        snapshot = ths_collector(raw_sink=raw.append, timeout=5, max_pages=4)
+        if not snapshot['coverage_complete']:
+            raise ValueError('同花顺分页覆盖不完整')
+        result = _reference_report(report, snapshot, raw,
+                                   stamp(clock()) if clock else now)
+        result['transport_notes'] += failures
+        return result, raw
+    except Exception as exc:
+        failures.append('同花顺时点未知参考：'+str(exc))
+    report['missing'] += failures
+    report['sampled_at'] = report['generated_at'] = (stamp(clock()) if clock else now).isoformat()
+    # The failed fallback must not revive primary rows that aged during retries.
+    report['top10'] = report['attention_top3'] = report['all_rows'] = report['partial_reference'] = []
+    report['status'] = 'unavailable'
+    report['coverage']['valid_funds'] = report['coverage']['valid_quotes'] = 0
+    report['coverage']['failed_funds'] = report['coverage']['expected']
+    report['raw_fingerprint'] = digest(raw)
+    report['failure_signature'] = digest({'provider': 'all-unavailable', 'missing': sorted(failures)})
+    return report, raw
+
+
 def edition(report):
     return digest(report)
 
@@ -374,6 +503,12 @@ def decision(report):
     fault = report['status'] != 'complete'
     old_fault = state.get('fault_signature')
     signature = report.get('failure_signature') if fault else None
+    if report.get('reference_complete'):
+        if report.get('slot') and any(r.get('slot') == report['slot'] and
+                (r.get('ranking_complete') or r.get('reference_complete'))
+                for r in state.get('sent', {}).values()):
+            return {'notify': False, 'reason': '本时点参考榜已发送', 'edition': version}
+        return {'notify': True, 'reason': '备用来源完整参考榜；不代表实时源已恢复', 'edition': version}
     if report.get('ranking_complete'):
         if report.get('slot') and any(r.get('slot') == report['slot'] and r.get('ranking_complete') is True
                                       for r in state.get('sent', {}).values()):
@@ -402,6 +537,8 @@ def publish(report, raw):
         atomic_json(folder()/'current.json', report)
         if report['status'] == 'complete':
             atomic_json(folder()/'last_success.json', report)
+        if report.get('reference_complete'):
+            atomic_json(folder()/'last_reference.json', report)
         if report.get('slot'):
             slots = read_json(folder()/'slots.json', {})
             slots[report['slot']] = {'edition': version, 'status': report['status'],
@@ -416,29 +553,38 @@ def amount(value):
 
 def topic(report):
     now = stamp(report['generated_at'])
-    cutoff = min([stamp(r['source_time']) for r in report['all_rows']], default=now)
+    reference = report.get('reference_only', False)
+    display_rows = report.get('reference_top10', []) if reference else (report['top10'] or report['partial_reference'])
+    times = [stamp(r['source_time']) for r in (report.get('reference_rows', []) if reference else report['all_rows']) if r.get('source_time')]
+    cutoff = min(times, default=now)
     rows = []
-    for row in (report['top10'] or report['partial_reference']):
+    for row in display_rows:
         rows.append(dict(name=row['name']+' '+row['code'],
-            industry_state=(f"累计第{row['rank']}名 · " if row['rank'] else '局部参考，不授予全池名次 · ')+amount(row['main_cny']),
+            industry_state=('参考榜' if reference else '')+(f"累计第{row['rank']}名 · " if row['rank'] else '局部参考，不授予全池名次 · ')+amount(row['main_cny']),
             market_state=(f"涨幅{row['change_pct']:+.2f}%" if row['change_pct'] is not None else '涨幅缺失')+'；成交额'+amount(row['turnover_cny']),
-            evidence='同场30分钟净增额'+amount(row['delta_30m_cny'])+'；资金时间'+row['source_time'],
+            evidence='同场30分钟净增额'+amount(row['delta_30m_cny'])+'；资金时间'+(row['source_time'] or '原站未提供；取得时间不是资金时点'),
             counter='；'.join(row['notes']) or '主力为供应商大单分类统计，不能识别真实账户',
-            next='累计和30分钟均为正、涨幅为正后复核；转负或板块走弱则降序关注'))
+            next=('参考线索须取得新的有效同源时间及承接证据；不作为实时操作信号' if reference else '累计和30分钟均为正、涨幅为正后复核；转负或板块走弱则降序关注')))
     priority = [f"优先关注{r['attention_rank']}：{r['name']}；30分钟净增额{amount(r['delta_30m_cny'])}，累计{amount(r['main_cny'])}。" for r in report['attention_top3']]
-    changes = priority or ['暂无完整证据支持关注前三；累计排名与窗口积累情况见表。']
+    changes = priority or [report.get('reference_limit', '暂无完整证据支持关注前三；累计排名与窗口积累情况见表。')]
+    if report.get('reference_lag_seconds'):
+        lag = report['reference_lag_seconds']
+        changes.append(f"本轮资金自身时间落后实际采样{lag['min']:.0f}—{lag['max']:.0f}秒。")
+    changes += report.get('transport_notes', [])
     c = report.get('changes', {})
     if c.get('available'):
         changes.append('新入前十：'+('、'.join(c['new']) or '无')+'；退出前十：'+('、'.join(c['out']) or '无'))
     return {'schema_version': 1, 'topic_id': 'sector-fund-pulse', 'title': '半小时行业资金雷达',
             'as_of': cutoff.isoformat(), 'generated_at': now.isoformat(),
-            'valid_until': (cutoff+dt.timedelta(seconds=90)).isoformat() if report['all_rows'] else now.isoformat(),
+            'as_of_kind': 'delayed' if reference and times else 'capture' if not times else 'market',
+            'valid_until': now.isoformat() if reference else (cutoff+dt.timedelta(seconds=90)).isoformat() if report['all_rows'] else now.isoformat(),
             'status': report['status'],
-            'summary': f"采样{report['sampled_at']}；行业资金有效{report['coverage']['valid_funds']}/{report['coverage']['expected'] if report['coverage']['expected'] is not None else '全集未知'}。{report['scope']}。{report['method']}",
+            'summary': f"采样{report['sampled_at']}；{report.get('flow_label', '行业资金')}；"+(f"参考覆盖{report['coverage'].get('reference_records', 0)}/{report['coverage']['expected']}，实时资格0。" if reference else f"行业资金有效{report['coverage']['valid_funds']}/{report['coverage']['expected'] if report['coverage']['expected'] is not None else '全集未知'}。")+report['scope']+'。'+report['method'],
             'changes': changes, 'directions': rows, 'missing': report['missing'],
-            'sources': [{'label': '东方财富行业资金', 'url': SOURCE,
-                         'published_at': cutoff.isoformat() if report['all_rows'] else '未取得源资金时间',
-                         'observation_period': '当日累计及同一上午/下午连续30分钟', 'retrieved_at': now.isoformat()}]}
+            'sources': [{'label': report.get('flow_label', '东方财富行业资金'), 'url': report.get('source_url', SOURCE),
+                         'published_at': cutoff.isoformat() if times else '未取得源资金时间',
+                         'observation_period': '同一来源累计及连续30分钟；参考与实时分开', 'retrieved_at': now.isoformat()}]+
+                       [dict(s, published_at='原站说明', observation_period='资金统计定义与延迟', retrieved_at=now.isoformat()) for s in report.get('extra_sources', [])]}
 
 
 @contextlib.contextmanager
@@ -466,7 +612,7 @@ def run(*, now=None, feed=None, scheduled=False, no_page=False):
             report, raw = collect(actual, _BrokenFeed(context['error']), slot=context['slot'],
                                   clock=None if now is not None else lambda: dt.datetime.now(TZ))
         else:
-            report, raw = collect(actual, feed or Feed(), slot=context['slot'],
+            report, raw = collect_with_fallback(actual, feed=feed, slot=context['slot'],
                                   clock=None if now is not None else lambda: dt.datetime.now(TZ))
         report['changes'] = compare_previous(report, read_json(folder()/'current.json', {}))
         result = publish(report, raw)
@@ -497,16 +643,30 @@ def mark_sent(version):
         state = read_json(folder()/'delivery.json', {})
         state.setdefault('sent', {})[version] = {'sampled_at': report['sampled_at'], 'slot': report.get('slot'),
                                                'ranking_complete': report.get('ranking_complete', False),
+                                               'reference_complete': report.get('reference_complete', False),
                                                'recorded_at': dt.datetime.now(TZ).isoformat()}
         state['fault_signature'] = report['failure_signature'] if report['status'] != 'complete' else None
         atomic_json(folder()/'delivery.json', state)
 
 
 def markdown(report):
+    reference = report.get('reference_only', False)
     lines = [f"**行业资金雷达 · {report['sampled_at']}**", '',
-             report['scope']+'。', '',
-             f"覆盖：{report['coverage']['valid_funds']}/{report['coverage']['expected'] if report['coverage']['expected'] is not None else '全集未知'}；状态：{report['status']}。", '']
-    if not report['ranking_complete']:
+             report.get('flow_label', '东方财富行业主力净额')+'；'+report['scope']+'。', '',
+             (f"参考覆盖：{report['coverage'].get('reference_records', 0)}/{report['coverage']['expected']}；实时榜尚未恢复。" if reference else f"覆盖：{report['coverage']['valid_funds']}/{report['coverage']['expected'] if report['coverage']['expected'] is not None else '全集未知'}；状态：{report['status']}。"), '']
+    if reference:
+        lines += [report['reference_limit']]
+        lag = report.get('reference_lag_seconds')
+        if lag:
+            lines += [f"本轮资金自身时间落后实际采样{lag['min']:.0f}—{lag['max']:.0f}秒。"]
+        lines += ['',
+                  '|参考名次|行业|累计资金净额|同场30分钟净额|涨幅|资金自身时间|',
+                  '|---:|---|---:|---:|---:|---|']
+        for r in report['reference_top10']:
+            source = r.get('source_time')
+            time_label = source[11:19] if source else '原站未提供'
+            lines.append(f"|{r['rank']}|{r['name']}|{amount(r['main_cny'])}|{amount(r['delta_30m_cny'])}|{r['change_pct']:+.2f}%|{time_label}|")
+    elif not report['ranking_complete']:
         lines.append('未取得完整同期行业资金，暂不发布全市场前十及优先关注排名。')
     if report['top10']:
         lines += ['|排名（较上轮）|行业|当日累计净额|同场30分钟增量|涨幅|成交额|盘口原生净占比|源资金时间|',
@@ -521,14 +681,15 @@ def markdown(report):
         lines += ['', '**优先复核方向**（按30分钟净增额排序）']
         for r in report['attention_top3']:
             lines.append(f"{r['attention_rank']}. {r['name']}：30分钟{amount(r['delta_30m_cny'])}，累计{amount(r['main_cny'])}，涨幅{r['change_pct']:+.2f}%。")
-    else:
+    elif not reference:
         lines += ['', '关注前三暂空：窗口积累或同刻证据不足时继续等待。']
     if report.get('changes', {}).get('available'):
         lines += ['', '新入前十：'+('、'.join(report['changes']['new']) or '无')+'；退出前十：'+('、'.join(report['changes']['out']) or '无')+'。']
     if report['missing']:
         lines += ['', '数据缺口：'+'；'.join(report['missing'][:4])+('；其余见本地完整记录。' if len(report['missing']) > 4 else '。')]
-    lines += ['', '主力净额为供应商分类统计；盘口原生净占比属于clist快照口径，可能与分钟净额存在时点或修订差异。排序表示当前资金关注证据，不是收益概率。',
-              f'[资金来源]({SOURCE}) · [本地页面](http://127.0.0.1:8767/latest.html#topic-sector-fund-pulse)']
+    lines += ['', report.get('flow_definition', '主力净额为供应商大单分类统计。')+' 排序不是收益概率；不同供应商不混算。',
+              f"[资金来源]({report.get('source_url', SOURCE)}) · [本地页面](http://127.0.0.1:8767/latest.html#topic-sector-fund-pulse)"]
+    lines += [f"[{s['label']}]({s['url']})" for s in report.get('extra_sources', [])]
     return '\n'.join(lines)
 
 
