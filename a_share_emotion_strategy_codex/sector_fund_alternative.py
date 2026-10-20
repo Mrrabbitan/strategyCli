@@ -21,6 +21,8 @@ from bs4 import BeautifulSoup
 
 
 THS_URL = 'https://data.10jqka.com.cn/funds/hyzjl/field/tradezdf/order/desc/page/{page}/ajax/1/free/1/'
+THS_PUBLIC_URLS = ('https://data.10jqka.com.cn/funds/hyzjl/', THS_URL.format(page=1))
+THS_MAX_BODY_BYTES = 2 * 1024 * 1024
 TZ = dt.timezone(dt.timedelta(hours=8))
 SINA_BASE = 'https://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/'
 SINA_LIST = SINA_BASE+'MoneyFlow.ssl_bkzj_bk?page=1&num=100&sort=netamount&asc=0&fenlei=0'
@@ -47,7 +49,9 @@ def _code(url: str) -> str:
 
 def parse_ths_page(html: str) -> dict:
     """Parse one unmodified public HTML page; this pure function never networks."""
-    soup = BeautifulSoup(html, 'html.parser')
+    # The public page contains malformed legacy IE conditional comments. The
+    # stdlib parser can swallow the real table; parse without rewriting evidence.
+    soup = BeautifulSoup(html, 'lxml')
     table = soup.select_one('table.J-ajax-table')
     page = soup.select_one('.page_info')
     if table is None or page is None:
@@ -248,32 +252,136 @@ def parse_ths_published_top10(html: str) -> dict:
     }
 
 
+class ThsCollectionError(RuntimeError):
+    """Stable public failure category; detailed attempts stay in private raw data."""
+    def __init__(self, message, *, error_kind, http_status=None, validation_code=None):
+        super().__init__(message)
+        self.error_kind = error_kind
+        self.http_status = http_status
+        self.validation_code = validation_code
+
+
 def collect_ths_published_top10(*, session=None, timeout: float = 5,
-                               raw_sink=None, now=None) -> dict:
-    """One ordinary public GET, no challenge handling, retries or page mixing."""
-    if not 0 < timeout <= 15:
+                               raw_sink=None, now=None, max_attempts=2,
+                               budget_seconds=12) -> dict:
+    """At most two ordinary same-provider requests, never an access workaround.
+
+    Only transport failures or HTTP 5xx permit the second public entrance. A
+    challenge, redirect, rate limit or invalid content stops immediately. A
+    successful response alone supplies every displayed value and its fingerprint.
+    """
+    import requests
+    if (not 0 < timeout <= 15 or type(max_attempts) is not int
+            or not 1 <= max_attempts <= len(THS_PUBLIC_URLS)
+            or not 0 < budget_seconds <= 30):
         raise ValueError('同花顺请求限制无效')
-    if session is None:
-        import requests
+    own_session = session is None
+    if own_session:
         session = requests.Session()
-    url = THS_URL.format(page=1)
-    response = session.get(url, timeout=timeout,
-                           headers={'User-Agent': 'Mozilla/5.0'})
-    response.encoding = 'gbk'
-    retrieved = (now or dt.datetime.now(TZ)).astimezone(TZ).isoformat()
-    body = response.text
-    fingerprint = hashlib.sha256(body.encode('utf-8')).hexdigest()
-    record = {'provider': 'ths', 'kind': 'ths-published-top10', 'url': url,
-              'source_url': url, 'retrieved_at': retrieved,
-              'status': response.status_code, 'headers': dict(response.headers),
-              'body': body, 'source_fingerprint': fingerprint}
-    if raw_sink:
-        raw_sink(record)
-    response.raise_for_status()
-    result = parse_ths_published_top10(body)
-    result.update(retrieved_at=retrieved, source_urls=[url],
-                  input_fingerprint=fingerprint)
-    return result
+    deadline = time.monotonic() + budget_seconds
+    last_error = None
+    try:
+        for attempt, url in enumerate(THS_PUBLIC_URLS[:max_attempts], 1):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            record = {'provider': 'ths', 'kind': 'ths-published-top10',
+                      'attempt': attempt, 'url': url, 'source_url': url,
+                      'started_at': (now or dt.datetime.now(TZ)).astimezone(TZ).isoformat()}
+            response = None
+            retryable = False
+            try:
+                response = session.get(url, timeout=min(timeout, remaining),
+                    headers={'User-Agent': 'Mozilla/5.0'},
+                    allow_redirects=False, stream=True)
+                if time.monotonic() > deadline:
+                    raise requests.Timeout('同花顺本轮读取预算用尽')
+                status = response.status_code
+                record.update(status=status, headers=dict(response.headers))
+                if status in (401, 403, 429) or 300 <= status < 400:
+                    kind = ('access_denied' if status in (401, 403) else
+                            'rate_limited' if status == 429 else 'redirect_rejected')
+                    raise ThsCollectionError(f'同花顺HTTP {status}，停止访问，不尝试绕过',
+                                             error_kind=kind, http_status=status)
+                chunks = []
+                if callable(getattr(response, 'iter_content', None)):
+                    size = 0
+                    for chunk in response.iter_content(chunk_size=65536):
+                        if time.monotonic() > deadline:
+                            raise requests.Timeout('同花顺本轮读取预算用尽')
+                        if chunk:
+                            size += len(chunk)
+                            if size > THS_MAX_BODY_BYTES:
+                                raise ThsCollectionError('同花顺响应超过大小限制',
+                                    error_kind='invalid_content', validation_code='body_size')
+                            chunks.append(chunk)
+                    wire = b''.join(chunks)
+                    body = wire.decode('gb18030', errors='replace')
+                    record['wire_fingerprint'] = hashlib.sha256(wire).hexdigest()
+                else:
+                    # Compatibility with deterministic offline response doubles.
+                    response.encoding = 'gbk'
+                    body = response.text
+                    if len(body.encode('utf-8')) > THS_MAX_BODY_BYTES:
+                        raise ThsCollectionError('同花顺响应超过大小限制',
+                            error_kind='invalid_content', validation_code='body_size')
+                fingerprint = hashlib.sha256(body.encode('utf-8')).hexdigest()
+                record.update(body=body, source_fingerprint=fingerprint)
+                visible = BeautifulSoup(body, 'lxml')
+                title = visible.title.get_text(' ', strip=True) if visible.title else ''
+                explicit_challenge = (re.search(r'安全验证|访问验证|验证码|captcha|access denied|security check|challenge', title, re.I)
+                    or re.search(r'请(?:完成|输入|通过).{0,12}(?:安全验证|验证码)|访问过于频繁|访问被拒绝',
+                                 visible.get_text(' ', strip=True), re.I))
+                missing_data_challenge = (not re.search(r'\bvar\s+JS_DATA\s*=', body)
+                    and re.search(r'验证码|安全验证|访问验证|访问过于频繁|captcha|access denied|challenge', body, re.I))
+                if explicit_challenge or missing_data_challenge:
+                    raise ThsCollectionError('同花顺返回访问验证，停止，不执行挑战',
+                                             error_kind='access_challenge', http_status=status)
+                if 500 <= status < 600:
+                    retryable = True
+                    raise ThsCollectionError('同花顺服务器暂时不可用',
+                                             error_kind='server_error', http_status=status)
+                if status != 200:
+                    raise ThsCollectionError(f'同花顺HTTP {status}，本轮停止',
+                                             error_kind='http_error', http_status=status)
+                try:
+                    result = parse_ths_published_top10(body)
+                except ValueError as exc:
+                    raise ThsCollectionError(str(exc), error_kind='invalid_content',
+                                             validation_code=str(exc)) from exc
+                retrieved = (now or dt.datetime.now(TZ)).astimezone(TZ).isoformat()
+                record.update(retrieved_at=retrieved, outcome='accepted')
+                result.update(retrieved_at=retrieved, source_urls=[url],
+                              input_fingerprint=fingerprint,
+                              request_attempts=attempt, transport_recovered=attempt > 1)
+                return result
+            except (requests.Timeout, requests.ConnectionError) as exc:
+                retryable = True
+                kind = 'timeout' if isinstance(exc, requests.Timeout) else 'connection_error'
+                last_error = ThsCollectionError('同花顺接口超时' if kind == 'timeout' else '同花顺连接失败',
+                                               error_kind=kind)
+                record.update(error_kind=kind, error_detail=str(exc), outcome='failed')
+            except ThsCollectionError as exc:
+                last_error = exc
+                record.update(error_kind=exc.error_kind, error_detail=str(exc),
+                              validation_code=exc.validation_code, outcome='failed')
+            except requests.RequestException as exc:
+                last_error = ThsCollectionError('同花顺请求失败', error_kind='request_error')
+                record.update(error_kind='request_error', error_detail=str(exc), outcome='failed')
+            finally:
+                record['finished_at'] = (now or dt.datetime.now(TZ)).astimezone(TZ).isoformat()
+                if raw_sink:
+                    raw_sink(record)
+                if response is not None and callable(getattr(response, 'close', None)):
+                    response.close()
+            if not retryable:
+                raise last_error
+        if last_error is not None:
+            raise last_error
+        raise ThsCollectionError('同花顺本轮采集预算用尽', error_kind='timeout')
+    finally:
+        if own_session:
+            session.close()
 
 
 def _session(moment):

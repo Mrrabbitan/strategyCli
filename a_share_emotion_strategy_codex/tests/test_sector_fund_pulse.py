@@ -271,7 +271,34 @@ class PulseTests(unittest.TestCase):
         for thread in threads: thread.start()
         for thread in threads: thread.join()
         self.assertEqual(feed.calls, 2)
-        self.assertEqual(sum(r['status']=='duplicate' for r in results), 1)
+        self.assertEqual(sum(r['status'] in ('duplicate', 'busy') for r in results), 1)
+
+    def test_busy_collector_never_queues_or_starts_another_request(self):
+        feed = FakeFeed()
+        with pulse.run_lock() as acquired:
+            self.assertTrue(acquired)
+            result = pulse.run(now=NOW, feed=feed, scheduled=True, no_page=True)
+        self.assertEqual(result['status'], 'busy')
+        self.assertFalse(result['notify'])
+        self.assertEqual(feed.calls, 0)
+
+    def test_dynamic_timeout_details_keep_evidence_but_not_duplicate_alerts(self):
+        def unavailable(address):
+            def collect(**kwargs):
+                raise TimeoutError('Connection at '+address+' timed out')
+            return collect
+        one, first_raw = pulse.collect_ths_only(NOW, collector=unavailable('0xAAAA'))
+        first = pulse.publish(one, first_raw)
+        pulse.mark_sent(first['edition'])
+        two, second_raw = pulse.collect_ths_only(NOW+dt.timedelta(seconds=1),
+                                                collector=unavailable('0xBBBB'))
+        self.assertEqual(one['failure_signature'], two['failure_signature'])
+        self.assertFalse(pulse.decision(two)['notify'])
+        self.assertIn('0xAAAA', first_raw[0]['error_detail'])
+        self.assertIn('0xBBBB', second_raw[0]['error_detail'])
+        denied, _ = pulse.collect_ths_only(NOW+dt.timedelta(seconds=2),
+            collector=lambda **kwargs: (_ for _ in ()).throw(ValueError('人工HTTP401访问挑战')))
+        self.assertTrue(pulse.decision(denied)['notify'])
 
 
     def _sina_reference(self, now=NOW):
@@ -418,6 +445,57 @@ class PulseTests(unittest.TestCase):
         r,_=pulse.collect_ths_only(NOW,collector=lambda **kwargs:snapshot)
         self.assertEqual(r['status'],'unavailable')
         self.assertFalse(r.get('reference_complete',False))
+
+    def test_older_verified_capture_only_enriches_history_after_later_failure(self):
+        snapshot = self._published_ths()
+        snapshot['source_urls'] = [pulse.THS_SOURCE]
+        reference, raw = pulse.collect_ths_only(NOW, collector=lambda **kwargs: snapshot)
+        later, failed_raw = pulse.collect_ths_only(NOW+dt.timedelta(minutes=1),
+            collector=lambda **kwargs: (_ for _ in ()).throw(TimeoutError('人工超时')))
+        pulse.publish(later, failed_raw)
+        archived = pulse.publish(reference, raw)
+        self.assertFalse(archived['changed'])
+        current = pulse.read_json(pulse.folder()/'current.json')
+        self.assertEqual(current['sampled_at'], later['sampled_at'])
+        self.assertEqual(current['status'], 'unavailable')
+        self.assertEqual(current.get('reference_top10', []), [])
+        historical = pulse.topic(current)['historical_fund_reference']
+        self.assertEqual(historical['sampled_at'], NOW.isoformat())
+        self.assertEqual(len(historical['rows']), 10)
+        self.assertEqual(pulse.topic(current)['directions'], [])
+        from research_topics import validate
+        validate(pulse.topic(current), NOW+dt.timedelta(minutes=1))
+        stale = copy.deepcopy(reference)
+        stale['sampled_at'] = (NOW-dt.timedelta(minutes=1)).isoformat()
+        pulse.publish(stale, raw)
+        self.assertEqual(pulse.read_json(pulse.folder()/'last_reference.json')['sampled_at'], NOW.isoformat())
+
+    def test_legacy_or_conflicting_reference_never_fills_failed_current(self):
+        snapshot = self._published_ths()
+        snapshot['source_urls'] = [pulse.THS_SOURCE]
+        reference, raw = pulse.collect_ths_only(NOW, collector=lambda **kwargs: snapshot)
+        later, _ = pulse.collect_ths_only(NOW+dt.timedelta(minutes=1),
+            collector=lambda **kwargs: (_ for _ in ()).throw(TimeoutError('人工超时')))
+        for key, value in (('provider', 'sina'), ('source_policy', 'legacy'),
+                           ('source_url', 'https://example.invalid/ths')):
+            invalid = copy.deepcopy(reference)
+            invalid[key] = value
+            pulse.atomic_json(pulse.folder()/'last_reference.json', invalid)
+            self.assertNotIn('historical_fund_reference', pulse.topic(later))
+        invalid = copy.deepcopy(reference)
+        invalid['reference_top10'][0]['source_time'] = NOW.isoformat()
+        pulse.atomic_json(pulse.folder()/'last_reference.json', invalid)
+        self.assertNotIn('historical_fund_reference', pulse.topic(later))
+        for key, value in (('sampled_at', NOW.replace(tzinfo=None).isoformat()),
+                           ('reference_top10', None), ('reference_top10', [None]*10)):
+            invalid = copy.deepcopy(reference)
+            invalid[key] = value
+            pulse.atomic_json(pulse.folder()/'last_reference.json', invalid)
+            self.assertNotIn('historical_fund_reference', pulse.topic(later))
+        invalid = copy.deepcopy(reference)
+        invalid['reference_top10'][0]['main_cny'] = 10**400
+        pulse.atomic_json(pulse.folder()/'last_reference.json', invalid)
+        self.assertNotIn('historical_fund_reference', pulse.topic(later))
 
 
 if __name__ == '__main__':

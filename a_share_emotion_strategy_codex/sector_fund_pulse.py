@@ -24,7 +24,7 @@ from market_calendar import is_trading_day
 from research_store import atomic_json, read_json, research_path, update_lock
 
 TZ = ZoneInfo('Asia/Shanghai')
-VERSION = '1.2.0'
+VERSION = '1.2.1'
 SOURCE = 'https://data.eastmoney.com/bkzj/hy.html'
 THS_SOURCE = 'https://data.10jqka.com.cn/funds/hyzjl/'
 SOURCE_POLICY = 'ths-only'
@@ -505,6 +505,27 @@ def collect_with_fallback(now, *, slot=None, clock=None, feed=None,
     return report, raw
 
 
+def _ths_failure(exc):
+    """Deduplicate failure kinds, never transient connection addresses or clocks."""
+    kind = getattr(exc, 'error_kind', None)
+    status = getattr(exc, 'http_status', None)
+    validation = getattr(exc, 'validation_code', None)
+    if kind is None:
+        message = str(exc)
+        if isinstance(exc, TimeoutError) or re.search(r'timeout|timed out|超时', message, re.I):
+            kind = 'timeout'
+        elif re.search(r'\b(401|403)\b|访问挑战|验证码|安全验证', message):
+            kind = 'access_denied'
+            match = re.search(r'\b(401|403)\b', message)
+            status = int(match.group(1)) if match else None
+        elif re.search(r'connection|连接|断连', message, re.I):
+            kind = 'connection_error'
+        else:
+            kind = 'invalid_content'
+            validation = re.sub(r'0x[0-9a-f]+', '<address>', message, flags=re.I)
+    return {'error_kind': kind, 'http_status': status, 'validation_code': validation}
+
+
 def collect_ths_only(now, *, slot=None, clock=None, collector=None, error=None):
     """Current user policy: THS only, no EM/Sina substitution on failure."""
     raw = []
@@ -538,14 +559,22 @@ def collect_ths_only(now, *, slot=None, clock=None, collector=None, error=None):
         finished = stamp(clock()) if clock else now
         report = _reference_report(base, snapshot, raw, finished)
         report['transport_notes'] = ['仅采用同花顺，不再自动切换东财或新浪。']
+        if snapshot.get('transport_recovered'):
+            report['transport_notes'].append('首个公开入口出现瞬时故障，已独立核验另一同花顺入口；未拼接响应。')
+        report['request_attempts'] = snapshot.get('request_attempts', 1)
         return report, raw
     except Exception as exc:
         finished = stamp(clock()) if clock else now
+        failure = _ths_failure(exc)
+        if not raw:
+            raw.append({'provider': 'ths', 'kind': 'ths-collection-failure',
+                        'retrieved_at': finished.isoformat(), 'outcome': 'failed',
+                        'error_detail': str(exc), **failure})
         base['sampled_at'] = base['generated_at'] = finished.isoformat()
         base['missing'] = ['同花顺本轮取数或完整性核验失败：'+str(exc)]
         base['raw_fingerprint'] = digest(raw)
-        base['failure_signature'] = digest({'source_policy': SOURCE_POLICY,
-                                            'missing': base['missing']})
+        base['failure_category'] = failure
+        base['failure_signature'] = digest({'source_policy': SOURCE_POLICY, **failure})
         return base, raw
 
 
@@ -593,16 +622,21 @@ def publish(report, raw):
     version = edition(report)
     with update_lock():
         existing = read_json(folder()/'current.json', {})
-        if stamp(existing.get('sampled_at')) and stamp(existing['sampled_at']) > stamp(report['sampled_at']):
-            return {'changed': False, 'notify': False, 'reason': '已有更新采样', 'edition': edition(existing)}
+        # A verified older capture may enrich history, never replace a later
+        # failed attempt or acquire that attempt's retrieval clock.
         atomic_json(folder()/'raw'/(report['raw_fingerprint']+'.json'), raw)
         atomic_json(folder()/'history'/(version+'.json'), report)
+        if report.get('reference_complete'):
+            previous = read_json(folder()/'last_reference.json', {})
+            if (not stamp(previous.get('sampled_at')) or
+                    stamp(previous['sampled_at']) < stamp(report['sampled_at'])):
+                atomic_json(folder()/'last_reference.json', report)
+        if stamp(existing.get('sampled_at')) and stamp(existing['sampled_at']) > stamp(report['sampled_at']):
+            return {'changed': False, 'notify': False, 'reason': '已有更新采样', 'edition': edition(existing)}
         atomic_json(folder()/'latest_attempt.json', report)
         atomic_json(folder()/'current.json', report)
         if report['status'] == 'complete':
             atomic_json(folder()/'last_success.json', report)
-        if report.get('reference_complete'):
-            atomic_json(folder()/'last_reference.json', report)
         if report.get('slot'):
             slots = read_json(folder()/'slots.json', {})
             slots[report['slot']] = {'edition': version, 'status': report['status'],
@@ -616,6 +650,56 @@ def publish(report, raw):
 
 def amount(value):
     return '缺失' if value is None else f'{value/1e8:+.2f}亿元'
+
+
+def _historical_ths_reference(report):
+    """A separate historical card, never a replacement for this failed sample."""
+    if report.get('status') != 'unavailable' or report.get('source_policy') != SOURCE_POLICY:
+        return None
+    old = read_json(folder()/'last_reference.json', {})
+    if not isinstance(old, dict):
+        return None
+    raw_capture = old.get('sampled_at')
+    try:
+        captured = dt.datetime.fromisoformat(raw_capture.replace('Z', '+00:00'))
+        if captured.tzinfo is None or captured.utcoffset() is None:
+            return None
+    except (ValueError, TypeError, AttributeError):
+        return None
+    current = stamp(report.get('sampled_at'))
+    from sector_fund_alternative import THS_PUBLIC_URLS
+    if (old.get('provider') != 'ths' or old.get('source_policy') != SOURCE_POLICY
+            or old.get('coverage_kind') != 'publisher_top10'
+            or old.get('reference_complete') is not True or old.get('reference_only') is not True
+            or not captured or not current or captured >= current
+            or old.get('source_url') not in THS_PUBLIC_URLS):
+        return None
+    rows = old.get('reference_top10', [])
+    if not isinstance(rows, list) or len(rows) != 10:
+        return None
+    checked, codes = [], set()
+    def finite(value):
+        try:
+            return not isinstance(value, bool) and isinstance(value, (int, float)) and math.isfinite(value)
+        except OverflowError:
+            return False
+    for rank, row in enumerate(rows, 1):
+        if not isinstance(row, dict):
+            return None
+        net, change = row.get('main_cny'), row.get('change_pct')
+        if (type(row.get('rank')) is not int or row['rank'] != rank
+                or not isinstance(row.get('code'), str) or not re.fullmatch(r'881\d{3}', row['code'])
+                or row['code'] in codes
+                or not isinstance(row.get('name'), str) or not row['name'].strip()
+                or not finite(net) or net < 0 or row.get('source_time') is not None
+                or (change is not None and not finite(change))):
+            return None
+        codes.add(row['code'])
+        checked.append(dict(rank=rank, code=row['code'], name=row['name'],
+                            net_cny=net, change_pct=change))
+    return dict(provider='ths', source_policy=SOURCE_POLICY, coverage_kind='publisher_top10',
+                sampled_at=captured.isoformat(), fund_source_time=None,
+                source_url=old['source_url'], rows=checked)
 
 
 def topic(report):
@@ -647,7 +731,7 @@ def topic(report):
     c = report.get('changes', {})
     if c.get('available'):
         changes.append('新入前十：'+('、'.join(c['new']) or '无')+'；退出前十：'+('、'.join(c['out']) or '无'))
-    return {'schema_version': 1, 'topic_id': 'sector-fund-pulse', 'title': '同花顺板块资金雷达' if report.get('source_policy') == SOURCE_POLICY else '半小时行业资金雷达',
+    result = {'schema_version': 1, 'topic_id': 'sector-fund-pulse', 'title': '同花顺板块资金雷达' if report.get('source_policy') == SOURCE_POLICY else '半小时行业资金雷达',
             'as_of': cutoff.isoformat(), 'generated_at': now.isoformat(),
             'as_of_kind': 'delayed' if reference and times else 'capture' if not times else 'market',
             'valid_until': now.isoformat() if reference else (cutoff+dt.timedelta(seconds=90)).isoformat() if report['all_rows'] else now.isoformat(),
@@ -658,6 +742,10 @@ def topic(report):
                          'published_at': cutoff.isoformat() if times else '未取得源资金时间',
                          'observation_period': '同花顺原生资金快照；行情归属日及资金时刻未提供' if report.get('provider') == 'ths' else '同一来源累计及连续30分钟；参考与实时分开', 'retrieved_at': now.isoformat()}]+
                        [dict(s, published_at='原站说明', observation_period='资金统计定义与延迟', retrieved_at=now.isoformat()) for s in report.get('extra_sources', [])]}
+    history = _historical_ths_reference(report)
+    if history is not None:
+        result['historical_fund_reference'] = history
+    return result
 
 
 @contextlib.contextmanager
@@ -665,8 +753,15 @@ def run_lock():
     path = folder()/'run.lock'
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with path.open('a') as handle:
-        fcntl.flock(handle, fcntl.LOCK_EX)
-        yield
+        try:
+            fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            yield False
+            return
+        try:
+            yield True
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 def run(*, now=None, feed=None, scheduled=False, no_page=False,
@@ -683,7 +778,9 @@ def run(*, now=None, feed=None, scheduled=False, no_page=False,
         context = schedule_context(actual, scheduled)
     if not context['run']:
         return {'status': 'skipped', 'notify': False, 'reason': context['reason']}
-    with run_lock():
+    with run_lock() as acquired:
+        if not acquired:
+            return {'status': 'busy', 'notify': False, 'reason': '已有采集进行，本轮不排队或重复请求'}
         if context.get('slot'):
             slots = read_json(folder()/'slots.json', {})
             previous_slot = slots.get(context['slot'])

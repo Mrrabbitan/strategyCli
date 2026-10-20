@@ -15,6 +15,10 @@ STOCK_TEXT = ('name', 'group', 'stage', 'returns', 'volume', 'flow', 'support',
               'pressure', 'evidence', 'counter', 'confirmation', 'invalidation', 'qualification')
 RELATED_MODULES = ('hot', 'dragon', 'yichujifa', 'prelaunch')
 DECISION_TIERS = ('conditional', 'observe', 'exit')
+THS_FUND_REFERENCE_URLS = frozenset((
+    'https://data.10jqka.com.cn/funds/hyzjl/',
+    'https://data.10jqka.com.cn/funds/hyzjl/field/tradezdf/order/desc/page/1/ajax/1/free/1/',
+))
 
 
 def _decision_tiers(data, codes):
@@ -66,6 +70,64 @@ def _source(source, generated):
         raise ValueError('Source retrieved after research')
 
 
+def _historical_fund_reference(data, cutoff, generated):
+    """Validate optional historical THS evidence without granting a current list."""
+    if 'historical_fund_reference' not in data:
+        return
+    reference = data['historical_fund_reference']
+    if (data.get('topic_id') != 'sector-fund-pulse'
+            or data.get('status') != 'unavailable' or data.get('directions') != []
+            or not isinstance(reference, dict)):
+        raise ValueError('Historical funds belong only to an unavailable empty current fund topic')
+    if (reference.get('provider') != 'ths' or reference.get('source_policy') != 'ths-only'
+            or reference.get('coverage_kind') != 'publisher_top10'
+            or 'fund_source_time' not in reference or reference['fund_source_time'] is not None
+            or not isinstance(reference.get('source_url'), str)
+            or reference.get('source_url') not in THS_FUND_REFERENCE_URLS):
+        raise ValueError('Invalid historical THS source policy or time quality')
+    for record in (data, reference):
+        if any(record.get(key, False) is not False for key in
+               ('eligible', 'current_eligible', 'ranking_complete', 'reference_complete')):
+            raise ValueError('Historical funds cannot grant current qualifications')
+    try:
+        raw_time = reference.get('sampled_at')
+        if not isinstance(raw_time, str):
+            raise ValueError('Missing historical fund capture time')
+        source_capture = dt.datetime.fromisoformat(raw_time.replace('Z', '+00:00'))
+        if source_capture.tzinfo is None or source_capture.utcoffset() is None:
+            raise ValueError('Historical fund capture needs an explicit timezone')
+    except (TypeError, ValueError) as exc:
+        raise ValueError('Invalid historical fund capture time') from exc
+    if not source_capture < cutoff or not source_capture < generated:
+        raise ValueError('Historical fund capture is not older than the current attempt')
+    rows = reference.get('rows')
+    if not isinstance(rows, list) or len(rows) != 10:
+        raise ValueError('Historical THS publisher reference requires ten original rows')
+    codes = set()
+    def finite_number(value):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            return False
+        try:
+            return math.isfinite(value)
+        except OverflowError:
+            return False
+    for rank, row in enumerate(rows, 1):
+        if (not isinstance(row, dict) or type(row.get('rank')) is not int
+                or row['rank'] != rank or not isinstance(row.get('name'), str)
+                or not row['name'].strip() or not isinstance(row.get('code'), str)
+                or not re.fullmatch(r'881\d{3}', row['code']) or row['code'] in codes):
+            raise ValueError('Invalid historical THS order or industry identity')
+        net, change = row.get('net_cny'), row.get('change_pct')
+        if not finite_number(net) or net < 0:
+            raise ValueError('Invalid historical THS native fund amount')
+        if change is not None and not finite_number(change):
+            raise ValueError('Invalid historical THS auxiliary quote')
+        if any(row.get(key, False) is not False for key in
+               ('eligible', 'current_eligible', 'ranking_complete', 'reference_complete')):
+            raise ValueError('Historical fund rows cannot grant current qualifications')
+        codes.add(row['code'])
+
+
 def validate(data, now):
     if not isinstance(data, dict) or data.get('schema_version') != 1:
         raise ValueError('Invalid topic schema')
@@ -103,6 +165,7 @@ def validate(data, now):
         if not isinstance(row, dict) or any(not isinstance(row.get(k), str) for k in
                                           ('name', 'industry_state', 'market_state', 'evidence', 'counter', 'next')):
             raise ValueError('Invalid direction')
+    _historical_fund_reference(data, cutoff, generated)
     for source in data.get('sources', []):
         _source(source, generated)
     stocks = data.get('stocks', [])
@@ -156,6 +219,30 @@ def _source_links(sources):
                      f' · 观察期 {escape(source["observation_period"])} · 取得 '
                      f'{escape(source.get("retrieved_at") or "原取得时间未记录，不以本次生成时间替代")}</li>')
     return ''.join(items)
+
+
+def _render_historical_fund_reference(data):
+    reference = data.get('historical_fund_reference')
+    if reference is None:
+        return ''
+    escape = lambda value: html.escape(str(value), quote=True)
+    rows = []
+    for row in reference['rows']:
+        change = ('缺失' if row.get('change_pct') is None
+                  else f'{row["change_pct"]:+.2f}%')
+        rows.append(f'<tr><td>{row["rank"]}</td><td>{escape(row["name"])} '
+                    f'{escape(row["code"])}</td><td>{row["net_cny"]/1e8:+.2f}亿元</td>'
+                    f'<td>{change}</td></tr>')
+    return (f'<details class="historical-fund-reference"><summary>上次成功参考（历史，非本轮）</summary>'
+            f'<p>旧采集时间：{escape(reference["sampled_at"])}；资金日期／时刻未知。'
+            '此表不是本轮榜单，不补当前数据，不表示实时资金或交易资格。</p>'
+            '<p>保留同花顺原站顺序，金额单位为亿元；原生资金净额不等于真实主力账户买卖。'
+            '辅助涨幅缺失时留空，不从其他响应补齐。</p>'
+            '<div style="overflow-x:auto"><table><thead><tr><th>原站序位</th><th>行业</th>'
+            '<th>原生资金净额</th><th>同响应辅助涨幅</th></tr></thead>'
+            f'<tbody>{"".join(rows)}</tbody></table></div>'
+            f'<p><a href="{escape(reference["source_url"])}" target="_blank" '
+            'rel="noopener noreferrer">历史参考来源</a></p></details>')
 
 
 def _stock_comparison(data):
@@ -285,6 +372,7 @@ def render_topics(*, now=None, exclude=(), include=None):
 <p>{escape(data['summary'])}</p><h3>相较上次的变化</h3><ul>{changes}</ul>
 {_render_decision_tiers(data)}
 {direction_table}
+{_render_historical_fund_reference(data)}
 {_stock_comparison(data)}
 <details><summary>来源时间与未验证条件</summary><ul>{sources}</ul><ul>{missing}</ul></details>
 </section>''')
