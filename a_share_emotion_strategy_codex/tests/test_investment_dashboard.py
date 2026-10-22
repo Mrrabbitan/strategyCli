@@ -6,6 +6,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import patch
+from lxml import html
 from investment_dashboard import render_dashboard, render_playbooks, verified_reports
 from build_investment_site import build
 from research_store import private_path, atomic_json
@@ -17,9 +18,13 @@ class InvestmentDashboardTests(unittest.TestCase):
         self.env=patch.dict(os.environ,{'AUTOSTRATEGY_PRIVATE_ROOT':self.tmp.name});self.env.start();self.addCleanup(self.env.stop)
         self.y=patch('investment_dashboard.research_status',return_value={'as_of':None,'generated_at':None,'state':'测试空状态','missing':[],'link':None})
         self.y.start();self.addCleanup(self.y.stop)
-    def test_ten_pages_and_independent_rules_without_accounts(self):
+    def test_eleven_pages_and_independent_rules_without_accounts(self):
         page=render_dashboard(dt.date(2026,9,11))
-        for name in ('hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','strategy','reports'):self.assertIn(f'id="page-{name}"',page)
+        pages=('hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports')
+        tree=html.fromstring(page)
+        self.assertEqual(tree.xpath('//nav[@aria-label="主要导航"]/*/@data-page'),list(pages))
+        self.assertEqual(len(tree.xpath('//*[contains(concat(" ",normalize-space(@class)," ")," page ")]')),11)
+        for name in pages:self.assertEqual(len(tree.xpath(f'//*[@id="page-{name}"]')),1)
         for name in ('prelaunch','yichujifa','dragon','late-day','three-step'):self.assertIn(f'id="strategy-{name}"',page)
         self.assertIn('href="#strategy-event-timing"',page)
         self.assertNotIn('id="page-event-timing"',page)
@@ -28,6 +33,19 @@ class InvestmentDashboardTests(unittest.TestCase):
             self.assertNotIn(f'id="{old}"',page)
         self.assertNotIn('@@',page);self.assertNotIn('"holdings":',page)
         self.assertIn('第二次',page);self.assertIn('9:50',page);self.assertIn('RR',page)
+    def test_highmark_content_and_legacy_anchor_only_live_in_dedicated_page(self):
+        fictional='<article id="topic-highmark-abnormal"><h2>人工高标样例</h2><details id="highmark-evidence"><summary>人工计算证据</summary>仅用于离线验证</details></article>'
+        with patch('highmark_views.render',return_value=fictional),patch('night_radar_views.render_page',return_value='<article id="fixture-night-radar">人工晚间报告</article>'):
+            tree=html.fromstring(render_dashboard(dt.date(2026,9,11)))
+        self.assertEqual(len(tree.xpath('//*[@id="topic-highmark-abnormal"]')),1)
+        highmark=tree.xpath('//*[@id="page-highmark"]')[0]
+        reports=tree.xpath('//*[@id="page-reports"]')[0]
+        self.assertEqual(len(highmark.xpath('.//*[@id="topic-highmark-abnormal"]')),1)
+        self.assertEqual(len(highmark.xpath('.//*[@id="highmark-evidence"]')),1)
+        self.assertNotIn('open',highmark.xpath('.//*[@id="highmark-evidence"]')[0].attrib)
+        self.assertFalse(reports.xpath('.//*[@id="topic-highmark-abnormal"]'))
+        self.assertNotIn('人工高标样例',reports.text_content())
+        self.assertEqual(len(reports.xpath('.//*[@id="fixture-night-radar"]')),1)
     def test_research_overlay_has_rules_without_market_or_execution_state(self):
         root=Path(self.tmp.name);doc=root/'docs/playbooks/event-timing.md'
         doc.parent.mkdir(parents=True);doc.write_text('人工规则 <说明>',encoding='utf-8')

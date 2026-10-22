@@ -3,7 +3,7 @@
   const $ = s => document.querySelector(s);
   let activePage = 'hot', busy = false, version = null, timer;
   function switchPage(next) {
-    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','strategy','reports'].includes(next)) next = 'reports';
+    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports'].includes(next)) next = 'reports';
     activePage = next;
     document.querySelectorAll('.page').forEach(el => { el.hidden = el.id !== `page-${next}`; });
     document.querySelectorAll('[data-page]').forEach(el => {
@@ -27,6 +27,7 @@
     if (nightDay) selectNightDay(nightDay.dataset.nightDay);
     if (target.tagName === 'DETAILS') target.open = true;
     requestAnimationFrame(() => target.scrollIntoView({block:'start'}));
+    return parent.id.slice(5);
   }
   document.querySelectorAll('[data-page]').forEach(b => b.addEventListener('click', () => {
     history.replaceState(null, '', `#page-${b.dataset.page}`); switchPage(b.dataset.page); window.scrollTo({top:0});
@@ -201,12 +202,12 @@
   document.addEventListener('visibilitychange',schedule);
   setupRadarTabs();
   setupNightTabs();
-  locateHash();
+  const hashPage = locateHash();
   try {
     const stored = JSON.parse(sessionStorage.getItem('investment-reading') || 'null');
     sessionStorage.removeItem('investment-reading');
     if (stored) {
-      switchPage(stored.page);
+      switchPage(hashPage || stored.page);
       const open = new Set(stored.open || []);
       document.querySelectorAll('details[id]').forEach(el => { el.open = open.has(el.id); });
       (stored.filters || []).forEach(f => {
@@ -217,7 +218,8 @@
       });
       restoreRadarReading(stored.radar);
       selectNightDay(stored.night);
-      requestAnimationFrame(()=>window.scrollTo(0,stored.scroll));
+      // A moved legacy anchor wins over the former page and scroll position.
+      if (!hashPage || hashPage === stored.page) requestAnimationFrame(()=>window.scrollTo(0,stored.scroll));
     }
   } catch { /* A stale reading preference never blocks the working surface. */ }
   schedule();

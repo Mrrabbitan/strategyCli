@@ -13,7 +13,7 @@ from research_store import read_json, research_path
 
 TZ = ZoneInfo('Asia/Shanghai')
 ANCHOR = 'topic-highmark-abnormal'
-PAGE_URL = 'http://127.0.0.1:8767/latest.html#' + ANCHOR
+PAGE_URL = 'http://127.0.0.1:8767/latest.html#page-highmark'
 REFERENCE = '滚动参考，公告重置未全量核验'
 WINDOWS = (('3', 20), ('10', 100), ('30', 200))
 PHASES = {'preopen': '盘前', 'close': '盘后'}
