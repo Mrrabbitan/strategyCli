@@ -122,6 +122,7 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', polic
     from three_step_views import render_page as render_three_step
     from sector_radar_views import render_page as render_sector_radar
     from night_radar_views import render_page as render_night_radar
+    from highmark_views import render as render_highmark
     report_date = report_date or latest_report_date()
     policy_pages = policy_pages or {}
     data = {'reports': verified_reports(report_date, slots), 'report_date': str(report_date)}
@@ -134,6 +135,7 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', polic
         '@@SECTOR_FUNDS@@': render_topics(include=('sector-fund-pulse',)) or
             '<p class="notice">板块资金尚未取得可展示的记录；后续同花顺资金研究会在这里更新。</p>',
         '@@NIGHT_RADAR@@': render_night_radar(),
+        '@@HIGHMARK@@': render_highmark(),
         '@@LATE_DAY@@': policy_pages['late-day'] if 'late-day' in policy_pages else render_late_day(),
         '@@THREE_STEP@@': policy_pages['three-step'] if 'three-step' in policy_pages else render_three_step(),
         '@@SECTOR_RADAR@@': render_sector_radar(),
