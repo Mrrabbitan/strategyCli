@@ -146,6 +146,26 @@ def _metric(metric):
     return result
 
 
+def adjustment_coverage(bars, dates):
+    """Require a reference or adjustment diagnostic for each native-close pair."""
+    def finite(value):
+        try:
+            return not isinstance(value, bool) and math.isfinite(float(value)) and float(value) > 0
+        except (TypeError, ValueError, OverflowError):
+            return False
+    indexed = {bar.get('date'): bar for bar in bars}
+    for before, current in zip(dates, dates[1:]):
+        prior, row = indexed.get(before, {}), indexed.get(current, {})
+        reference = row.get('prev_close', row.get('pre_close', row.get('preclose')))
+        if finite(reference):
+            continue
+        if any(all(finite(bar.get(key, bar.get(alias))) for bar in (prior, row))
+               for key, alias in (('adjust_factor', 'adj_factor'), ('qfq_close', 'adj_close'))):
+            continue
+        return False
+    return bool(dates)
+
+
 def build_report(evidence, *, now, phase, trade_date, resets=None):
     from highmark_rules import calculate, SOURCES
     resets = resets or {}
@@ -203,6 +223,9 @@ def build_report(evidence, *, now, phase, trade_date, resets=None):
         available = {bar.get('date') for bar in bars}
         if not set(expected_dates).issubset(available):
             note.append('最近31个交易日日线不完整，不跨停牌或缺口补值')
+            usable = False
+        if not adjustment_coverage(bars, expected_dates):
+            note.append('31日除权参考或同源复权关系不完整，偏离与次日情景暂不发布')
             usable = False
         if data.get('quote_verified') is False:
             usable = False

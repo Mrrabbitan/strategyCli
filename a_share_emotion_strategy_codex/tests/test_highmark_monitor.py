@@ -54,6 +54,35 @@ class HighmarkMonitorTest(unittest.TestCase):
         self.assertEqual(row['metrics'], {})
         self.assertTrue(row['excluded'])
 
+    def test_missing_adjustment_diagnostic_cannot_publish_precise_values(self):
+        data = copy.deepcopy(self.evidence)
+        stock = data['stocks']['002001']
+        for bar in stock['history']:
+            bar.pop('prev_close', None)
+        stock['adjustment_check'] = {'status': 'unavailable'}
+        report = self.report(data)
+        self.assertEqual(report['coverage']['scanned_count'], 0)
+        self.assertEqual(report['rows'][0]['metrics'], {})
+        self.assertTrue(report['rows'][0]['excluded'])
+
+    def test_adjusted_series_must_cover_the_cutoff_pair(self):
+        data = copy.deepcopy(self.evidence)
+        stock = data['stocks']['002001']
+        for bar in stock['history']:
+            bar.pop('prev_close', None)
+        stock['adjusted_history'] = copy.deepcopy(stock['history'])
+        self.assertEqual(self.report(data)['coverage']['scanned_count'], 1)
+        stock['adjusted_history'].pop()
+        self.assertEqual(self.report(data)['coverage']['scanned_count'], 0)
+
+    def test_invalid_reference_values_do_not_attest_adjustment_coverage(self):
+        for value in (0, -1, True, 'inf', 'nan'):
+            with self.subTest(value=value):
+                data = copy.deepcopy(self.evidence)
+                for bar in data['stocks']['002001']['history']:
+                    bar['prev_close'] = value
+                self.assertEqual(self.report(data)['coverage']['scanned_count'], 0)
+
     def test_missing_index_session_does_not_join_dates(self):
         data = copy.deepcopy(self.evidence)
         data['benchmarks']['sz399107']['history'].pop(-5)
