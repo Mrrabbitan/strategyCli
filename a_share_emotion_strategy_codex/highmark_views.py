@@ -152,7 +152,7 @@ def _stock(row):
 
 def _state(row):
     boards = _number(row.get('boards'))
-    label = (f'{boards:g}连板' if boards and boards > 0 else '断板／趋势跟踪')
+    label = (f'{boards:g}连板' if boards and boards > 0 else '历史高标跟踪')
     if row.get('missing'):
         label += ' · 证据不齐'
     pending = row.get('pending_reset_kinds') or []
