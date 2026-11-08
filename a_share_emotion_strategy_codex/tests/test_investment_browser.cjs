@@ -29,7 +29,12 @@ const highmark = '<article id="topic-highmark-abnormal"><h2>Fictional highmark m
   '<details id="highmark-evidence"><summary>Highmark evidence</summary>'+
   '<div style="height:900px">Fictional calculation evidence only</div></details>'+
   '<div style="height:1500px">Fictional highmark reading restoration area</div></article>';
-const etfs = `<div data-etf-monitor data-etf-asof="2099-01-01"><b data-etf-validity>Fictional fixture</b>
+const flowHistory = `<section id="etf-em-history" data-flow-history data-flow-selected-date="2026-08-14">
+<label>Historical date<select data-flow-date><option value="2026-08-14">14</option><option value="2026-08-13">13</option><option value="2026-08-12">12</option></select></label>
+<div id="etf-flow-days"><section id="etf-flow-day-2026-08-14" data-flow-day="2026-08-14">Fictional latest day</section>
+<section id="etf-flow-day-2026-08-13" data-flow-day="2026-08-13" hidden><details id="fictional-flow-evidence"><summary>Fictional flow evidence</summary>Artificial amounts only</details></section>
+<section id="etf-flow-day-2026-08-12" data-flow-day="2026-08-12" hidden>Fictional earliest day</section></div></section>`;
+const etfs = `<div data-etf-monitor data-etf-asof="2099-01-01"><b data-etf-validity>Fictional fixture</b>${flowHistory}
 <label>Search<input data-etf-search></label><label>State<select data-etf-filter><option value="all">all</option><option value="trend">trend</option><option value="turn">turn</option><option value="repair">repair</option><option value="weak">weak</option></select></label>
 <label>Sort<select data-etf-sort><option value="default">default</option><option value="pct5">5 days</option><option value="pct20">20 days</option><option value="vol20">volatility</option></select></label>
 <span data-etf-count></span><p data-etf-empty hidden>No match</p><div data-etf-quote-at="2000-01-01T10:00:00+08:00"><span data-etf-quote-status>Artificial quote</span></div><table><tbody>
@@ -164,7 +169,22 @@ const server = http.createServer((req,res)=>{
     });
     assert.match(await page.locator('[data-etf-validity]').textContent(),/历史参考/);
     assert.match(await page.locator('[data-etf-quote-status]').textContent(),/时效不足/);
+    await page.locator('[data-flow-date]').selectOption('2026-08-13');
+    assert.equal(await page.locator('[data-flow-day]:not([hidden])').getAttribute('data-flow-day'),'2026-08-13');
+    await page.locator('#fictional-flow-evidence summary').click();
+    await page.evaluate(()=>window.scrollTo(0,720));
+    revision='six';const flowReloaded=page.waitForEvent('load');
+    await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await flowReloaded;
+    await page.waitForFunction(()=>Math.abs(window.scrollY-720)<10);
+    assert.equal(await page.locator('[data-flow-date]').inputValue(),'2026-08-13');
+    assert.notEqual(await page.locator('#fictional-flow-evidence').getAttribute('open'),null);
+    await page.evaluate(()=>sessionStorage.setItem('investment-reading',JSON.stringify({
+      page:'etf-monitor',flow:'2026-08-13',scroll:720,filters:[],open:[]
+    })));
+    await page.goto(`http://127.0.0.1:${server.address().port}/?fictional-flow-migration=1#etf-flow-day-2026-08-12`);
+    assert.equal(await page.locator('[data-flow-date]').inputValue(),'2026-08-12');
+    assert.equal(await page.locator('[data-flow-day]:not([hidden])').getAttribute('data-flow-day'),'2026-08-12');
     assert.deepEqual(errors,[]);
-    console.log('Offline browser: twelve tabs, legacy anchors, detail/scroll restoration, ETF search/sort/state restoration and expiry passed.');
+    console.log('Offline browser: twelve tabs, legacy anchors, ETF controls, historical flow dates/deep links and reading restoration passed.');
   } finally {if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

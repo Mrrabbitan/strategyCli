@@ -368,14 +368,16 @@ def render(report=None, now=None):
                           f'<span>{_e(event.get("date"))} · {_link(event.get("source"))}</span></li>')
     from etf_pressure_views import render as render_pressure
     pressure = render_pressure(now=current) if read_private_pressure else render_pressure(report={}, now=current)
+    from etf_flow_history_views import render as render_flow_history
+    flow_history = render_flow_history(now=current) if read_private_pressure else render_flow_history(report={}, now=current)
     return (f'<section class="etfm" data-etf-monitor data-etf-asof="{cn_date.isoformat()}">'
             '<header class="etfm-heading"><div><span class="etfm-kicker">ETF / MARKET OBSERVATORY</span><h1>ETF监控</h1>'
             '<p>趋势、热度与海外对照，分开验证。</p></div>'
             f'<div class="etfm-heading-meta"><span class="etfm-status" data-etf-validity>{status}</span>'
             f'<p>A股 {cn_date.isoformat()} · 美股 {us_date.isoformat() if us_date else "待补"}</p></div></header>{stale}'
-            '<nav class="etfm-jumps" aria-label="ETF监控区域"><a href="#etfm-pressure">资金与阴线</a><a href="#etfm-cn">国内走势</a><a href="#etfm-intraday">盘中复核</a><a href="#etfm-turn">拐点观察</a>'
+            '<nav class="etfm-jumps" aria-label="ETF监控区域"><a href="#etf-em-history">主力历史</a><a href="#etfm-pressure">同花顺与阴线</a><a href="#etfm-cn">国内走势</a><a href="#etfm-intraday">盘中复核</a><a href="#etfm-turn">拐点观察</a>'
             '<a href="#etfm-heat">行业热度</a><a href="#etfm-us">美股对照</a><a href="#etfm-evidence">覆盖与方法</a></nav>'
-            f'{pressure}'
+            f'{flow_history}{pressure}'
             '<div class="etfm-summary"><article class="etfm-summary-focus"><span>原报告重点</span>'
             f'<strong>{_e(priority["name"]) if priority else "暂无优先观察项"}</strong>'
             f'<p>{_e(focus.get("basis"), "等待趋势、波动与来源证据齐备；热度不能替代趋势。")}</p></article>'

@@ -1,0 +1,11 @@
+/* Separate, dated Eastmoney model series; keep THS reference styling independent. */
+[data-flow-history] .etfm-toolbar{margin:18px 0;border-bottom:1px solid var(--etfm-line);border-radius:5px;align-items:center}
+[data-flow-history] .etfm-toolbar label{min-width:190px}
+[data-flow-history] .etfm-toolbar select{min-width:190px}
+[data-flow-history] [data-flow-day]{margin:20px 0}
+[data-flow-history] .etfm-table{min-width:370px}
+[data-flow-history] .etfm-table th:first-child,[data-flow-history] .etfm-table td:first-child{width:48px;text-align:right}
+[data-flow-history] .etfm-table .etfm-identity{min-width:175px;max-width:260px}
+[data-flow-history] .etfm-summary article:first-child strong{font-size:21px;line-height:1.7}
+[data-flow-history] .etfm-summary{margin-bottom:20px}
+@media(max-width:680px){[data-flow-history] .etfm-toolbar{display:flex;align-items:flex-start;flex-wrap:wrap;gap:12px}[data-flow-history] .etfm-toolbar label{width:100%;max-width:none}[data-flow-history] .etfm-toolbar select{width:100%}[data-flow-history] .etfm-result-count{margin:0;text-align:left}[data-flow-history] .etfm-summary article:first-child strong{font-size:20px}[data-flow-history] .etfm-table .etfm-identity{min-width:170px}}

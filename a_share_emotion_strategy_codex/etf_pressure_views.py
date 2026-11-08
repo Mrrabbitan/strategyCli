@@ -152,7 +152,7 @@ def _flow(value, now):
         warning += ' 采集已超过4日，以下仅留历史参考。'
     rejected = f'<p class="etfm-note">{bad_in + bad_out}个原始位置因字段不足未展示；不取第十一名补位，不改写原名次。</p>' if bad_in + bad_out else ''
     return ('<section id="etfp-flow" class="etfm-section"><header class="etfm-section-heading"><div>'
-            '<span class="etfm-kicker">ORDINARY FLOW / REFERENCE</span><h2>净流入与净流出参考</h2></div>'
+            '<span class="etfm-kicker">THS / ORDINARY FLOW REFERENCE</span><h2>同花顺 · 普通资金参考</h2></div>'
             f'<span class="etfm-badge">{state}</span></header><p class="etfm-warning">{warning}</p>'
             '<p class="etfm-note">资金自身日期 / 时刻：未知（不以采集时间代替）。'
             f'采集时间：{_e(retrieved.isoformat() if retrieved else None)}。'
@@ -282,7 +282,7 @@ def render(report=None, now=None):
             '若资金净流出，则检查量价背离与兑现压力，不能据此直接卖出。</p></article>'
             '<article><h3>价格走弱</h3><p>若可靠资金同刻净流出，可提高风险复核优先级；若净流入，则检查承接或下跌中换手，'
             '不能据此直接抄底。</p></article></div>'
-            '<p>本页普通净额资金时点未知、ETF与行业成分不同，四象限暂不合并计算；大阴线不能直接命名为资金撤退。'
+            '<p>同花顺普通净额参考的资金时点未知、ETF与行业成分不同，四象限暂不合并计算；大阴线不能直接命名为资金撤退。'
             '原站参考榜与日线形态均不构成确认买入或自动退出信号。</p></details>'
             f'<details id="etfp-gaps" class="etfm-sources"><summary>覆盖与待核验项</summary><ul>{gap_html or "<li>需继续核验资金自身时间、主力口径、全行业覆盖与价格复权一致性。</li>"}</ul></details>'
             '</section>')

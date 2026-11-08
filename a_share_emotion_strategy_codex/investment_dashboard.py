@@ -146,7 +146,7 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', polic
         '@@YICHUJIFA_TOPICS@@': render_topic_links('yichujifa'),
         '@@PRELAUNCH_TOPICS@@': render_topic_links('prelaunch'),
         '@@DATA@@': json.dumps(data, ensure_ascii=False).replace('<', '\\u003c'),
-        '@@CSS@@': (ROOT / 'templates/investment.css').read_text() + '\n' + (ROOT / 'templates/etf_monitor.css').read_text(),
+        '@@CSS@@': (ROOT / 'templates/investment.css').read_text() + '\n' + (ROOT / 'templates/etf_monitor.css').read_text() + '\n' + (ROOT / 'templates/etf_flow_history.css').read_text(),
         '@@JS@@': (ROOT / 'templates/investment.js').read_text(),
     }
     page = (ROOT / 'templates/investment.html').read_text()

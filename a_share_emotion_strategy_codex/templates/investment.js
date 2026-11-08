@@ -25,6 +25,8 @@
     if (radarDay) selectRadarDay(radarDay.dataset.radarDay, radarList?.dataset.radarList);
     const nightDay = target.closest('[data-night-day]');
     if (nightDay) selectNightDay(nightDay.dataset.nightDay);
+    const flowDay = target.closest('[data-flow-day]');
+    if (flowDay) selectFlowDay(flowDay.dataset.flowDay);
     const etfRow = target.closest('[data-etf-row]');
     if (etfRow?.hidden) {
       const root = etfRow.closest('[data-etf-monitor]');
@@ -102,7 +104,7 @@
   }
   function saveReading() {
     const filters = [...document.querySelectorAll('[data-research-search]')].map(el => ({module:el.dataset.researchSearch, search:el.value, filter:document.querySelector(`[data-research-filter="${el.dataset.researchSearch}"]`)?.value || 'all'}));
-    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, filters, etf:etfReading(), radar:radarReading(), night:document.querySelector('[data-night-radar]')?.dataset.nightSelectedDate, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
+    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, filters, flow:document.querySelector('[data-flow-history]')?.dataset.flowSelectedDate, etf:etfReading(), radar:radarReading(), night:document.querySelector('[data-night-radar]')?.dataset.nightSelectedDate, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
   }
   function selectNightDay(date) {
     const root = document.querySelector('[data-night-radar]'); if (!root) return;
@@ -192,6 +194,27 @@
     root.querySelector('[data-etf-sort]')?.addEventListener('change',filterEtfs);
     filterEtfs();
   }
+  function selectFlowDay(date) {
+    const root = document.querySelector('[data-flow-history]'); if (!root) return;
+    const days = [...root.querySelectorAll('[data-flow-day]')];
+    const chosen = days.find(day=>day.dataset.flowDay===date) || days[0]; if (!chosen) return;
+    days.forEach(day=>{day.hidden=day!==chosen;});
+    root.dataset.flowSelectedDate=chosen.dataset.flowDay;
+    const select = root.querySelector('[data-flow-date]');
+    if (select) select.value=chosen.dataset.flowDay;
+  }
+  function setupFlowHistory() {
+    const root = document.querySelector('[data-flow-history]'); if (!root) return;
+    root.querySelector('[data-flow-date]')?.addEventListener('change',event=>selectFlowDay(event.target.value));
+    selectFlowDay(root.dataset.flowSelectedDate);
+  }
+  function restoreFlowHistory(date) {
+    let target;
+    try {target=document.getElementById(decodeURIComponent(location.hash.slice(1)));} catch { /* Ignore malformed hashes. */ }
+    const day=target?.closest('[data-flow-day]');
+    const root=document.querySelector('[data-flow-history]');
+    selectFlowDay(day?.dataset.flowDay || date || root?.dataset.flowSelectedDate);
+  }
   function restoreEtfs(saved) {
     const root = document.querySelector('[data-etf-monitor]'); if (!root || !saved) return;
     const search = root.querySelector('[data-etf-search]');
@@ -279,6 +302,7 @@
   setupRadarTabs();
   setupNightTabs();
   setupEtfs();
+  setupFlowHistory();
   const hashPage = locateHash();
   try {
     const stored = JSON.parse(sessionStorage.getItem('investment-reading') || 'null');
@@ -296,8 +320,11 @@
       restoreRadarReading(stored.radar);
       selectNightDay(stored.night);
       restoreEtfs(stored.etf);
+      restoreFlowHistory(stored.flow);
       // A moved legacy anchor wins over the former page and scroll position.
-      if (!hashPage || hashPage === stored.page) requestAnimationFrame(()=>window.scrollTo(0,stored.scroll));
+      let flowAnchor;
+      try {flowAnchor=document.getElementById(decodeURIComponent(location.hash.slice(1)))?.closest('[data-flow-day]');} catch { /* Keep valid saved state. */ }
+      if ((!hashPage || hashPage === stored.page) && (!flowAnchor || flowAnchor.dataset.flowDay === stored.flow)) requestAnimationFrame(()=>window.scrollTo(0,stored.scroll));
     }
   } catch { /* A stale reading preference never blocks the working surface. */ }
   schedule();
