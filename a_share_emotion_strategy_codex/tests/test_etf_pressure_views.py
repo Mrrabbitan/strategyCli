@@ -26,17 +26,6 @@ def fixture():
             'generated_at': DAY + 'T15:40:00+08:00',
             'universe_label': '人工固定ETF代理样本，非全市场',
             'candles': [candle],
-            'flow': {'status': 'reference_only', 'provider': '同花顺',
-                     'metric': '普通资金净额（未标主力）', 'as_of': None,
-                     'retrieved_at': NOW.isoformat(),
-                     'inflows': [{'code': '881901', 'name': '人工行业甲', 'net_yuan': 123000000,
-                                  'rank': 1, 'change_pct': 1.25}],
-                     'outflows': [{'code': '881902', 'name': '人工行业乙', 'net_yuan': -87000000,
-                                   'rank': 1, 'change_pct': -2.5}],
-                     'source': 'https://data.10jqka.com.cn/funds/hyzjl/',
-                     'note': '资金自身时点未提供，仅参考',
-                     'coverage_kind': 'publisher_top10_each', 'universe_complete': False,
-                     'is_main_metric': False},
             'coverage': {'candles': 1}, 'gaps': ['未取得全行业成分广度']}
 
 
@@ -52,38 +41,39 @@ class EtfPressureViewTests(unittest.TestCase):
     def page(self, report=None, now=NOW):
         return views.render(fixture() if report is None else report, now=now)
 
-    def test_two_reference_lists_precede_candles_with_separate_clocks_and_metric(self):
+    def test_only_price_pressure_and_independent_history_reference_are_displayed(self):
         page = self.page()
-        self.assertLess(page.index('净流入参考前十'), page.index('大阴线 · ETF代理复核'))
-        self.assertIn('净流出参考前十', page)
-        self.assertIn('主力口径未核验 · 当日资金时间尚缺', page)
-        self.assertIn('普通资金净额（未标主力）', page)
-        self.assertIn('资金自身日期 / 时刻：未知', page)
-        self.assertIn('采集时间：2026-10-10T09:00:00+08:00', page)
-        self.assertIn('原站各前十，非全行业', page)
-        self.assertIn('+1.23 亿', page)
-        self.assertIn('-8,700.00 万', page)
+        self.assertIn('大阴线与量价压力', page)
+        self.assertIn('id="etfm-pressure"', page)
+        self.assertIn('id="etfp-bear"', page)
         self.assertIn('不是全行业扫描', page)
         self.assertIn('资金与价格四象限怎么读', page)
-        self.assertIn('四象限暂不合并计算', page)
+        self.assertIn('独立东财历史资金', page)
+        self.assertIn('href="#etf-em-history"', page)
+        self.assertIn('须对齐日期、行业分类与ETF成分范围', page)
         self.assertIn('大阴线不能直接命名为资金撤退', page)
+        for text in ('同花顺', '普通净额', '0/10', '资金时点未知', '净流入参考前十',
+                     '净流出参考前十', 'id="etfp-flow"', 'id="etfp-inflows"', 'id="etfp-outflows"'):
+            self.assertNotIn(text, page)
 
-    def test_failed_or_bad_metric_flow_uses_no_old_rows_or_other_source(self):
-        for mutate in (lambda flow: flow.update(status='unavailable'),
-                       lambda flow: flow.update(is_main_metric=True),
-                       lambda flow: flow.update(universe_complete=True),
-                       lambda flow: flow.update(provider='其他来源'),
-                       lambda flow: flow.update(metric='主力净额'),
-                       lambda flow: flow.update(as_of=DAY),
-                       lambda flow: flow.update(source='https://example.com/funds'),
-                       lambda flow: flow.update(retrieved_at='2026-10-11T09:00:00+08:00')):
-            report = fixture(); mutate(report['flow']); page = self.page(report)
-            self.assertIn('本轮资金榜不可用', page)
-            self.assertNotIn('<b>人工行业甲</b>', page)
-            self.assertNotIn('<b>人工行业乙</b>', page)
-            self.assertNotIn('+1.23 亿', page)
-            self.assertEqual(page.count('本轮该榜数据不可用'), 2)
-            self.assertIn('旧榜不冒充本轮成功', page)
+    def test_every_legacy_flow_payload_is_ignored_without_rendering_or_reading_it(self):
+        class UnreadableFlow(dict):
+            def get(self, *_args):
+                raise AssertionError('Removed flow payload must never be read')
+        injected = {'status': 'reference_only', 'provider': '同花顺',
+                    'metric': '普通资金净额（未标主力）', 'retrieved_at': NOW.isoformat(),
+                    'inflows': [{'code': '881901', 'name': '不应展示的旧资金榜', 'rank': 1,
+                                 'net_yuan': 123000000}],
+                    'source': 'https://example.com/?token=PRIVATE-FLOW-TOKEN',
+                    'note': '/Users/artificial/private/flow.json', 'account': 'PRIVATE-FLOW-ACCOUNT'}
+        baseline = self.page()
+        for value in (None, [], injected, dict(injected, status='unavailable'), UnreadableFlow(injected)):
+            report = fixture(); report['flow'] = value
+            page = self.page(report)
+            self.assertEqual(page, baseline)
+            for text in ('不应展示的旧资金榜', 'PRIVATE-FLOW-TOKEN', 'PRIVATE-FLOW-ACCOUNT',
+                         '/Users/artificial', '+1.23 亿', '同花顺'):
+                self.assertNotIn(text, page)
 
     def test_flat_valid_candle_is_known_not_large_bear(self):
         report = fixture(); row = report['candles'][0]
@@ -93,18 +83,32 @@ class EtfPressureViewTests(unittest.TestCase):
         self.assertIn('未达大阴线', page)
         self.assertNotIn('待核验 · 形态字段不足或冲突', page)
 
-    def test_publisher_order_and_first_ten_slots_are_not_sorted_or_replenished(self):
+    def test_retired_flow_gaps_are_filtered_but_price_date_and_basis_gaps_remain(self):
         report = fixture()
-        rows = [{'code': f'8819{i:02}', 'name': f'人工位置{i}', 'rank': i,
-                 'net_yuan': i * 10000, 'change_pct': 0} for i in range(1, 12)]
-        rows[0], rows[1] = rows[1], rows[0]
-        rows[2]['net_yuan'] = float('nan')
-        report['flow']['inflows'] = rows
+        old = ['同花顺资金采集失败', '普通资金净额无法核验', '历史日榜0/20且流入0/10',
+               '资金日期未与日K匹配，不把大阴线与资金净流出合并', 'THS timeout']
+        price = ['仅检查固定ETF代理范围，非全行业扫描', '复权口径尚待核验',
+                 '日线日期与报告错配，待重新取得', '分钟量比缺少同刻对比']
+        report['gaps'] = old + price
+        report['candles'][0]['missing'] = old + price
         page = self.page(report)
-        self.assertLess(page.index('<b>人工位置2</b>'), page.index('<b>人工位置1</b>'))
-        self.assertNotIn('<b>人工位置3</b>', page)
-        self.assertNotIn('<b>人工位置11</b>', page)
-        self.assertIn('不取第十一名补位', page)
+        for gap in old:
+            self.assertNotIn(gap, page)
+        for gap in price:
+            self.assertIn(gap, page)
+
+    def test_quotation_source_price_warnings_survive_removed_flow_module(self):
+        report = fixture()
+        price_warnings = ['同花顺日线日期缺失', '同花顺报价复权待核验',
+                          '同花顺日线接口超时，价格序列覆盖不足', 'THS quote价格时点不可用']
+        report['gaps'] = price_warnings + ['THS timeout', '同花顺资金采集失败', '历史资金日榜0/20']
+        report['candles'][0]['missing'] = price_warnings
+        page = self.page(report)
+        for warning in price_warnings:
+            self.assertIn(warning, page)
+        for retired in ('THS timeout', '同花顺资金采集失败', '历史资金日榜0/20'):
+            self.assertNotIn(retired, page)
+        self.assertNotIn('id="etfp-flow"', page)
 
     def test_candle_columns_keep_close_return_and_body_separate(self):
         page = self.page()
@@ -178,7 +182,7 @@ class EtfPressureViewTests(unittest.TestCase):
         report = fixture(); report.update(candles=[], flow={})
         page = self.page(report)
         self.assertIn('缺少可展示的已核验ETF日线', page)
-        self.assertIn('本轮资金榜不可用', page)
+        self.assertNotIn('本轮资金榜不可用', page)
         with tempfile.TemporaryDirectory() as root, patch.dict(os.environ, {'AUTOSTRATEGY_PRIVATE_ROOT': root}):
             self.assertIn('等待可核验', views.render(now=NOW))
             atomic_json(research_path('etf_pressure/current.json'), fixture())
@@ -186,8 +190,7 @@ class EtfPressureViewTests(unittest.TestCase):
 
     def test_unknown_fields_private_notes_unsafe_links_and_html_are_not_exposed(self):
         report = fixture(); report['payload'] = {'account': 'PRIVATE-PAYLOAD'}
-        report['flow']['note'] = '账户总资产123万元'
-        report['flow']['source'] = 'https://example.com/?token=PRIVATE-TOKEN'
+        report['flow'] = {'note': '账户总资产123万元', 'source': 'https://example.com/?token=PRIVATE-TOKEN'}
         row = report['candles'][0]; row['name'] = '<img src=x onerror=alert(1)>'
         row['source'] = 'http://example.com/insecure'
         row['price_basis'] = '/Users/artificial/private/account.json'

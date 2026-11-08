@@ -388,6 +388,9 @@ def render_topic_links(module, *, now=None):
             data = validate(read_json(path), now)
         except (ValueError, TypeError, AttributeError, KeyError):
             continue
+        if data.get('topic_id') == 'sector-fund-pulse':
+            # Removed from the workbench; legacy evidence remains private.
+            continue
         related = set(data.get('related_modules', []))
         if data.get('related_module'):
             related.add(data['related_module'])

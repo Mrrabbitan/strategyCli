@@ -81,8 +81,8 @@ class EtfFlowHistoryViewTests(unittest.TestCase):
 
     def test_distinct_provider_model_scope_and_backfill_disclosures(self):
         page = self.page()
-        for text in ('东财模型主力', '大单 / 超大单', '与下方同花顺普通资金净额分开',
-                     '不直接比较两种口径', '历史回补与重新计算', '不倒填当时实时发布',
+        for text in ('东财模型主力', '大单 / 超大单', '不单独构成买卖信号',
+                     '历史回补与重新计算', '不倒填当时实时发布',
                      '当前行业目录被冻结后回溯', '分类会变化，成分可能重叠', '金额统一按人民币元保存'):
             self.assertIn(text, page)
         self.assertIn('+1.24 亿', page)
@@ -91,6 +91,14 @@ class EtfFlowHistoryViewTests(unittest.TestCase):
         self.assertIn('超大单净额', page)
         self.assertIn('+3.21 亿', page)  # supplied cumulative result, not a renderer sum
         self.assertNotIn('24.80 亿', page)
+
+    def test_removed_provider_note_does_not_restore_deleted_module(self):
+        report = fixture()
+        report['gaps'] = ['本榜与同花顺普通资金净额是不同来源、分类与模型，独立显示，不混排或补缺。',
+                          '部分历史成分尚未核验。']
+        page = self.page(report)
+        self.assertNotIn('同花顺', page)
+        self.assertIn('部分历史成分尚未核验', page)
 
     def test_partial_or_incomplete_catalog_never_exposes_old_formal_rankings(self):
         report = fixture()

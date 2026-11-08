@@ -1,4 +1,4 @@
-"""Read-only, conservative views of ETF candles and ordinary sector flow references."""
+"""Read-only ETF candle and volume-pressure observations; no flow payload rendering."""
 from __future__ import annotations
 
 import datetime as dt
@@ -10,7 +10,6 @@ from urllib.parse import parse_qsl, unquote, urlsplit
 from zoneinfo import ZoneInfo
 
 from research_store import read_json, research_path
-from sector_fund_alternative import THS_PUBLIC_URLS
 
 TZ = ZoneInfo('Asia/Shanghai')
 PRIVATE = re.compile(r'file:|/(?:Users|home|private|tmp|var)/|(?:^|\s)/[^\s]+|[A-Za-z]:\\|'
@@ -103,67 +102,15 @@ def _link(value, label='来源 ↗'):
             if url else '<span class="etfm-muted">来源链接待补</span>')
 
 
-def _flow_rows(value):
-    """Retain the publisher's first ten slots, never sort or fill rejected slots."""
-    rows, rejected, seen = [], 0, set()
-    for row in value[:10] if isinstance(value, list) else []:
-        if not isinstance(row, dict):
-            rejected += 1; continue
-        code, rank = row.get('code'), row.get('rank')
-        if (not isinstance(code, str) or not re.fullmatch(r'[A-Za-z0-9._-]{1,20}', code)
-                or code in seen or not isinstance(row.get('name'), str)
-                or not isinstance(rank, int) or isinstance(rank, bool) or not 1 <= rank <= 10
-                or not _finite(row.get('net_yuan'))):
-            rejected += 1; continue
-        seen.add(code); rows.append(row)
-    return rows, rejected
-
-
-def _flow_table(rows, title):
-    if not rows:
-        return '<p class="etfm-empty">本轮该榜数据不可用；不拿历史榜或其他来源补位。</p>'
-    body = ''.join(f'<tr><td><b>{_e(row["name"])}</b><small>{_e(row["code"])}</small></td>'
-                   f'<td>{row["rank"]}</td><td>{_amount(row["net_yuan"])}</td>'
-                   f'<td>{_pct(row.get("change_pct"))}</td></tr>' for row in rows)
-    return ('<div class="etfm-table-wrap"><table class="etfm-table etfm-heat-table">'
-            f'<caption class="etfm-sr-only">{title}，按原站发布顺序</caption>'
-            '<thead><tr><th scope="col">行业</th><th scope="col">原始名次</th>'
-            '<th scope="col">普通净额</th><th scope="col">来源涨跌幅</th></tr></thead>'
-            f'<tbody>{body}</tbody></table></div>')
-
-
-def _flow(value, now):
-    flow = value if isinstance(value, dict) else {}
-    retrieved = _clock(flow.get('retrieved_at'))
-    reference = (flow.get('status') == 'reference_only' and flow.get('provider') == '同花顺'
-                 and flow.get('metric') == '普通资金净额（未标主力）' and flow.get('as_of') is None
-                 and flow.get('source') in THS_PUBLIC_URLS
-                 and flow.get('coverage_kind') == 'publisher_top10_each'
-                 and flow.get('universe_complete') is False and flow.get('is_main_metric') is False
-                 and retrieved is not None and retrieved <= now)
-    inflows, bad_in = _flow_rows(flow.get('inflows')) if reference else ([], 0)
-    outflows, bad_out = _flow_rows(flow.get('outflows')) if reference else ([], 0)
-    state = '普通净额参考 · 资金时点未知' if reference else '本轮资金榜不可用'
-    warning = ('主力口径未核验 · 当日资金时间尚缺。以下为同花顺普通资金净额，原站未标为主力；'
-               '即使两榜有值，也不能据此识别主力、机构或实时流向。')
-    if not reference:
-        warning += ' 本轮未取得可用的新榜，旧榜不冒充本轮成功。'
-    if reference and (now-retrieved).total_seconds() > 4 * 86400:
-        warning += ' 采集已超过4日，以下仅留历史参考。'
-    rejected = f'<p class="etfm-note">{bad_in + bad_out}个原始位置因字段不足未展示；不取第十一名补位，不改写原名次。</p>' if bad_in + bad_out else ''
-    return ('<section id="etfp-flow" class="etfm-section"><header class="etfm-section-heading"><div>'
-            '<span class="etfm-kicker">THS / ORDINARY FLOW REFERENCE</span><h2>同花顺 · 普通资金参考</h2></div>'
-            f'<span class="etfm-badge">{state}</span></header><p class="etfm-warning">{warning}</p>'
-            '<p class="etfm-note">资金自身日期 / 时刻：未知（不以采集时间代替）。'
-            f'采集时间：{_e(retrieved.isoformat() if retrieved else None)}。'
-            '覆盖：原站各前十，非全行业；保留原站顺序，不重排、不补位。</p>'
-            f'<p class="etfm-note">本轮状态：{_e(flow.get("note"), "未取得本轮可核验资金证据")} '
-            f'已展示流入{len(inflows)}/10项、流出{len(outflows)}/10项。</p>'
-            '<div class="etfm-duo"><div class="etfm-panel" id="etfp-inflows"><h3>净流入参考前十</h3>'
-            + _flow_table(inflows, '净流入参考前十') + '</div>'
-            '<div class="etfm-panel" id="etfp-outflows"><h3>净流出参考前十</h3>'
-            + _flow_table(outflows, '净流出参考前十') + '</div></div>' + rejected +
-            f'<p class="etfm-note">指标：普通资金净额（未标主力），金额以人民币元换算。{_link(flow.get("source"), "同花顺原站 ↗")}</p></section>')
+def _price_gaps(value):
+    """Do not resurrect retired flow modules through legacy snapshot notes."""
+    if not isinstance(value, list):
+        return []
+    flow_context = re.compile(r'资金|普通(?:资金)?净额|(?:流入|流出).*0\s*/\s*(?:10|20)|历史.*日榜.*0\s*/\s*20', re.I)
+    price_context = re.compile(r'日线|报价|复权|价格|OHLC|quote|qfq|\bprice\b', re.I)
+    legacy_source_failure = re.compile(r'(?:同花顺|\bTHS\b).*(?:timeout|超时|失败|不可用)', re.I)
+    return [gap for gap in value if isinstance(gap, str) and not flow_context.search(gap)
+            and not (legacy_source_failure.search(gap) and not price_context.search(gap))]
 
 
 def _candles(value, as_of):
@@ -206,14 +153,14 @@ def _candle_table(rows, current):
         if not current:
             label = '历史 / 待核验 · ' + label
         cls = 'etfm-badge-weak' if row['_large'] and current else 'etfm-badge'
-        missing = [item for item in row.get('missing', []) if isinstance(item, str)] if isinstance(row.get('missing'), list) else []
+        missing = _price_gaps(row.get('missing'))
         details = ''.join(f'<li>{_e(item)}</li>' for item in missing)
         body.append(f'<tr><td class="etfm-identity"><details id="etfp-candle-{row["code"]}" class="etfm-detail">'
                     f'<summary><b>{_e(row["name"])}</b><span class="etfm-code">{row["code"]} · {_e(row.get("as_of"))}</span></summary>'
                     '<div class="etfm-detail-body">'
                     f'<p>开 {_num(row.get("open"), 3)} · 收 {_num(row.get("close"), 3)} · 高 {_num(row.get("high"), 3)} · 低 {_num(row.get("low"), 3)}</p>'
                     f'<p>价格口径：{_e(row.get("price_basis"), "复权口径待核验")}。{_link(row.get("source"))}</p>'
-                    f'<ul>{details or "<li>快照未列额外缺口，不代表已完成全市场及资金核验。</li>"}</ul></div></details></td>'
+                    f'<ul>{details or "<li>快照未列额外缺口，不代表已完成全市场价格核验。</li>"}</ul></div></details></td>'
                     f'<td>{_pct(row.get("change_pct"))}<small>相对昨收</small></td>'
                     f'<td>{_pct(row["_body"])}<small>收盘 / 开盘 − 1</small></td>'
                     f'<td>{_num(row["_body_range"], suffix="%")}</td><td>{_num(row["_position"], suffix="%")}</td>'
@@ -232,8 +179,8 @@ def render(report=None, now=None):
     report = read_json(research_path('etf_pressure/current.json'), {}) if report is None else report
     if (not isinstance(report, dict) or report.get('schema_version') != 1
             or isinstance(report.get('schema_version'), bool)):
-        return ('<section id="etfm-pressure" class="etfm etfm-section"><h2>资金与大阴线观察</h2>'
-                '<p class="etfm-empty">本轮数据不可用，等待可核验的新快照；未取得数据不等于没有资金流出或大阴线。</p></section>')
+        return ('<section id="etfm-pressure" class="etfm etfm-section"><h2>大阴线与量价压力</h2>'
+                '<p class="etfm-empty">本轮数据不可用，等待可核验的新快照；未取得数据不等于没有大阴线。</p></section>')
     day, generated = _date(report.get('as_of')), _clock(report.get('generated_at'))
     old = day is not None and (now.date()-day).days > 4
     future = day is None or day > now.date() or generated is None or generated > now
@@ -262,11 +209,10 @@ def render(report=None, now=None):
         count_note = '历史 / 待核验记录，不能确认本轮大阴线。' + count_note
     if rejected:
         count_note += f' {rejected}条记录因代码、重复或行情日期不一致未展示。'
-    gaps = [gap for gap in report.get('gaps', []) if isinstance(gap, str)] if isinstance(report.get('gaps'), list) else []
+    gaps = _price_gaps(report.get('gaps'))
     gap_html = ''.join(f'<li>{_e(gap)}</li>' for gap in gaps)
     return ('<section id="etfm-pressure" class="etfm etfm-section"><header class="etfm-section-heading"><div>'
-            '<span class="etfm-kicker">FLOW &amp; PRICE PRESSURE</span><h2>资金流向与大阴线观察</h2></div></header>'
-            + _flow(report.get('flow'), now) +
+            '<span class="etfm-kicker">CANDLES &amp; VOLUME PRESSURE</span><h2>大阴线与量价压力</h2></div></header>'
             '<section id="etfp-bear" class="etfm-section"><header class="etfm-section-heading"><div>'
             '<span class="etfm-kicker">COMPLETED DAILY CANDLES</span><h2>大阴线 · ETF代理复核</h2></div>'
             f'<span class="etfm-badge">{validity}</span></header>'
@@ -282,7 +228,7 @@ def render(report=None, now=None):
             '若资金净流出，则检查量价背离与兑现压力，不能据此直接卖出。</p></article>'
             '<article><h3>价格走弱</h3><p>若可靠资金同刻净流出，可提高风险复核优先级；若净流入，则检查承接或下跌中换手，'
             '不能据此直接抄底。</p></article></div>'
-            '<p>同花顺普通净额参考的资金时点未知、ETF与行业成分不同，四象限暂不合并计算；大阴线不能直接命名为资金撤退。'
-            '原站参考榜与日线形态均不构成确认买入或自动退出信号。</p></details>'
-            f'<details id="etfp-gaps" class="etfm-sources"><summary>覆盖与待核验项</summary><ul>{gap_html or "<li>需继续核验资金自身时间、主力口径、全行业覆盖与价格复权一致性。</li>"}</ul></details>'
+            '<p>与<a href="#etf-em-history">独立东财历史资金</a>联合复核前，须对齐日期、行业分类与ETF成分范围；'
+            '映射未核验时不合并计算。大阴线不能直接命名为资金撤退，历史资金与日线形态不自动合成交易信号。</p></details>'
+            f'<details id="etfp-gaps" class="etfm-sources"><summary>覆盖与待核验项</summary><ul>{gap_html or "<li>需继续核验ETF代理范围、完整日线日期与价格复权一致性。</li>"}</ul></details>'
             '</section>')

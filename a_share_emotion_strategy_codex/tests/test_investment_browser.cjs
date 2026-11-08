@@ -9,7 +9,7 @@ const path = require('node:path');
 const http = require('node:http');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const js = fs.readFileSync(path.join(__dirname, '../templates/investment.js'), 'utf8');
-const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports','etf-monitor'];
+const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','highmark','strategy','reports','etf-monitor'];
 const panel = `<div data-module="three-step" data-module-until="2099-01-01T15:00:00+08:00">
 <div class="research-status"><b>Research</b></div><p class="module-validity">Fictional fixture</p>
 <span class="qualified-count">1</span><input data-research-search="three-step">
@@ -19,10 +19,6 @@ const panel = `<div data-module="three-step" data-module-until="2099-01-01T15:00
 <details id="fixture-b" data-candidate data-search="fiction-b" data-bucket="pending"><summary>B <span class="candidate-state">Pending</span></summary>Fictional only</details>
 </div></div>`;
 const rules = '<a href="#strategy-event-timing">Event timing</a><article id="strategy-event-timing"><h2>Fictional research overlay</h2><details id="strategy-event-timing-rules"><summary>Rules and source</summary>Fictional rules only</details></article><article id="strategy-late-day">Fictional existing rules</article>';
-const funds = '<article id="topic-sector-fund-pulse"><h2>Fictional sector funds</h2>'+
-  '<p>Artificial publisher reference only</p><details id="fixture-fund-sources"><summary>Fund sources</summary>'+
-  '<div style="height:900px">Fictional source evidence only</div></details>'+
-  '<div style="height:1500px">Fictional scroll restoration area</div></article>';
 const highmark = '<article id="topic-highmark-abnormal"><h2>Fictional highmark monitor</h2>'+
   '<p>Artificial threshold evidence only</p><details id="highmark-other"><summary>Other fictional tracked stocks</summary>'+
   '<div>Artificial records, not market data</div></details>'+
@@ -43,7 +39,7 @@ const etfs = `<div data-etf-monitor data-etf-asof="2099-01-01"><b data-etf-valid
 <tr data-etf-row data-etf-code="000003" data-etf-name="fixture gamma" data-etf-bucket="trend" data-etf-pct5="2" data-etf-pct20="5" data-etf-vol20="10"><td>Gamma</td></tr>
 </tbody></table><div style="height:1800px">Fictional scroll area</div></div>`;
 const html = '<!doctype html><style>[hidden]{display:none!important}</style>'+pages.map(p=>`<button data-page="${p}">${p}</button>`).join('')+
-  pages.map(p=>`<section class="page" id="page-${p}" hidden>${p==='three-step'?panel:p==='strategy'?rules:p==='sector-funds'?funds:p==='highmark'?highmark:p==='etf-monitor'?etfs:p}</section>`).join('')+
+  pages.map(p=>`<section class="page" id="page-${p}" hidden>${p==='three-step'?panel:p==='strategy'?rules:p==='highmark'?highmark:p==='etf-monitor'?etfs:p}</section>`).join('')+
   '<div id="update-state"></div><script>'+js+'</script>';
 let revision = 'one';
 const server = http.createServer((req,res)=>{
@@ -75,26 +71,19 @@ const server = http.createServer((req,res)=>{
     });
     assert.equal(await page.locator('.qualified-count').textContent(),'0 条');
     assert.equal(await page.locator('[data-candidate][data-bucket="other"]').count(),2);
-    assert.equal(await page.locator('[data-page]').count(),12);
+    assert.equal(await page.locator('[data-page]').count(),11);
     await page.locator('[data-page="sector-radar"]').click();
     assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-radar');
-    await page.locator('[data-page="sector-funds"]').click();
-    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-funds');
-    assert.equal(await page.locator('[data-page="sector-funds"]').getAttribute('aria-current'),'page');
+    assert.equal(await page.locator('[data-page="sector-funds"]').count(),0);
+    await page.evaluate(()=>sessionStorage.setItem('investment-reading',JSON.stringify({page:'sector-funds',scroll:720,filters:[],open:[]})));
     const fundsVersionReady=page.waitForResponse(r=>r.url().endsWith('/api/dashboard-version'));
     await page.goto(`http://127.0.0.1:${server.address().port}/#topic-sector-fund-pulse`);
     await fundsVersionReady;
-    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-funds');
-    await page.locator('#fixture-fund-sources summary').click();
-    await page.evaluate(()=>window.scrollTo(0,720));
-    const fundsScrollBefore=await page.evaluate(()=>window.scrollY);
-    assert.ok(fundsScrollBefore>700);
-    revision='three';const fundsReloaded=page.waitForEvent('load');
-    await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await fundsReloaded;
-    await page.waitForFunction(()=>Math.abs(window.scrollY-720)<10);
-    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-funds');
-    assert.notEqual(await page.locator('#fixture-fund-sources').getAttribute('open'),null);
-    assert.ok(Math.abs((await page.evaluate(()=>window.scrollY))-fundsScrollBefore)<10);
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-etf-monitor');
+    assert.equal(await page.locator('#topic-sector-fund-pulse').count(),0);
+    assert.equal(await page.locator('#etf-em-history').isVisible(),true);
+    await page.evaluate(()=>{location.hash='page-sector-funds';});
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-etf-monitor');
     await page.locator('[data-page="highmark"]').click();
     assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-highmark');
     assert.equal(await page.locator('[data-page="highmark"]').getAttribute('aria-current'),'page');
@@ -185,6 +174,6 @@ const server = http.createServer((req,res)=>{
     assert.equal(await page.locator('[data-flow-date]').inputValue(),'2026-08-12');
     assert.equal(await page.locator('[data-flow-day]:not([hidden])').getAttribute('data-flow-day'),'2026-08-12');
     assert.deepEqual(errors,[]);
-    console.log('Offline browser: twelve tabs, legacy anchors, ETF controls, historical flow dates/deep links and reading restoration passed.');
+    console.log('Offline browser: eleven tabs, removed THS route migration, ETF/history controls and reading restoration passed.');
   } finally {if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

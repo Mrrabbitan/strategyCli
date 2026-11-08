@@ -3,7 +3,8 @@
   const $ = s => document.querySelector(s);
   let activePage = 'hot', busy = false, version = null, timer;
   function switchPage(next) {
-    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports','etf-monitor'].includes(next)) next = 'reports';
+    if (next === 'sector-funds') next = 'etf-monitor';
+    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','highmark','strategy','reports','etf-monitor'].includes(next)) next = 'reports';
     activePage = next;
     document.querySelectorAll('.page').forEach(el => { el.hidden = el.id !== `page-${next}`; });
     document.querySelectorAll('[data-page]').forEach(el => {
@@ -18,6 +19,7 @@
     let id;
     try { id = decodeURIComponent(location.hash.slice(1)); } catch { return; }
     if (['page-plans','page-etf','monitor-live'].includes(id)) id = 'page-reports';
+    if (['page-sector-funds','topic-sector-fund-pulse','etfp-flow','etfp-inflows','etfp-outflows'].includes(id)) id = 'etf-em-history';
     const target = document.getElementById(id), parent = target?.closest('.page');
     if (!parent) return;
     switchPage(parent.id.slice(5));

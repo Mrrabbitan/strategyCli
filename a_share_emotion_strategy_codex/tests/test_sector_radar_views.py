@@ -15,6 +15,11 @@ NOW = dt.datetime(2026, 9, 25, 16, 0, tzinfo=views.TZ)
 
 
 class SectorRadarViewsTests(unittest.TestCase):
+    def setUp(self):
+        temp = tempfile.TemporaryDirectory(); self.addCleanup(temp.cleanup)
+        env = patch.dict(os.environ, {'AUTOSTRATEGY_PRIVATE_ROOT': temp.name})
+        env.start(); self.addCleanup(env.stop)
+
     def page(self, data=None, state='partial', days=None):
         report = fixture() if data is None else data
         if days is None:
@@ -131,12 +136,14 @@ class SectorRadarViewsTests(unittest.TestCase):
         self.assertNotIn('尚待核验', text)
         self.assertNotIn('费用待验证', text)
 
-    def test_no_real_lists_in_public_fixtures_and_twelve_pages_remain(self):
+    def test_no_real_lists_in_public_fixtures_and_eleven_pages_remain(self):
         with tempfile.TemporaryDirectory() as temp, patch.dict(os.environ, {'AUTOSTRATEGY_PRIVATE_ROOT': temp}):
             text = render_dashboard(dt.date(2026, 9, 23))
-        for name in ('hot', 'dragon', 'yichujifa', 'prelaunch', 'late-day', 'three-step', 'sector-radar', 'sector-funds', 'strategy', 'reports'):
+        for name in ('hot', 'dragon', 'yichujifa', 'prelaunch', 'late-day', 'three-step', 'sector-radar', 'highmark', 'strategy', 'reports', 'etf-monitor'):
             self.assertIn(f'id="page-{name}"', text)
-        self.assertEqual(text.count('class="nav-item'), 12)
+        self.assertEqual(text.count('class="nav-item'), 11)
+        self.assertNotIn('id="page-sector-funds"', text)
+        self.assertNotIn('id="topic-sector-fund-pulse"', text)
         for old in ('strategy-late-day', 'strategy-three-step', 'dragon-cycle-watchlist', 'hot-sector-board'):
             self.assertIn(f'id="{old}"', text)
         self.assertNotIn('@@', text)

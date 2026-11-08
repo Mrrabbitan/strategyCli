@@ -89,20 +89,30 @@ class TopicTests(unittest.TestCase):
         self.assertIn('本轮资料不可用，未发布新结果', text)
         self.assertNotIn('资金时点未知的参考快照', text)
 
-    def test_fund_topic_has_own_tab_without_duplication_or_broken_old_anchor(self):
+    def test_fund_topic_stays_in_history_without_dashboard_entry_or_topic(self):
         from investment_dashboard import render_dashboard
+        from research_store import atomic_json
         publish_topic(self.data, now=self.now)
         funds = dict(self.data, topic_id='sector-fund-pulse', title='人工资金参考')
         publish_topic(funds, now=self.now)
+        atomic_json(research_path('etf_monitor/current.json'), {
+            'schema_version': 1, 'status': 'partial', 'as_of_cn': '2026-01-08',
+            'as_of_us': None, 'generated_at': self.now.isoformat(),
+            'cn': [], 'us': [], 'heat': [], 'events': [], 'sources': [], 'gaps': [],
+            'coverage': {}, 'focus': {}})
         page = render_dashboard(self.now.date())
-        fund_page = page.split('<section id="page-sector-funds"', 1)[1].split('<section id="page-strategy"', 1)[0]
         reports = page.split('<section id="page-reports"', 1)[1]
-        self.assertEqual(page.count('id="topic-sector-fund-pulse"'), 1)
-        self.assertIn('id="topic-sector-fund-pulse"', fund_page)
-        self.assertNotIn('id="topic-sector-fund-pulse"', reports)
+        self.assertNotIn('id="page-sector-funds"', page)
+        self.assertNotIn('data-page="sector-funds"', page)
+        self.assertNotIn('id="topic-sector-fund-pulse"', page)
+        self.assertNotIn('人工资金参考', page)
         self.assertIn('id="topic-sample"', reports)
-        self.assertNotIn('id="topic-sample"', fund_page)
-        self.assertIn('data-page="sector-funds"', page)
+        self.assertIn('id="page-etf-monitor"', page)
+        self.assertIn('id="etf-em-history"', page)
+        self.assertIn('href="#etf-em-history"', page)
+        history = render_topics(now=self.now, include=('sector-fund-pulse',))
+        self.assertIn('id="topic-sector-fund-pulse"', history)
+        self.assertIn('人工资金参考', history)
         self.assertNotIn('@@', page)
 
     def test_topic_include_does_not_copy_other_topics_or_their_failure(self):
@@ -277,7 +287,7 @@ class TopicTests(unittest.TestCase):
         page = render_dashboard(self.now.date())
         self.assertEqual(re.findall(r'data-page="([a-z-]+)"', page),
                          ['hot', 'dragon', 'yichujifa', 'prelaunch', 'late-day', 'three-step', 'sector-radar',
-                          'sector-funds', 'highmark', 'strategy', 'reports', 'etf-monitor'])
+                          'highmark', 'strategy', 'reports', 'etf-monitor'])
         self.assertNotIn('@@', page)
         for module in data['related_modules']:
             surface = page.split(f'<section id="page-{module}"', 1)[1].split('<section id="page-', 1)[0]

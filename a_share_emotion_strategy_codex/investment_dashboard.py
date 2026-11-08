@@ -133,8 +133,6 @@ def render_dashboard(report_date=None, report=None, slots=None, alerts='', polic
         '@@PRELAUNCH@@': policy_pages['prelaunch'] if 'prelaunch' in policy_pages else render_module('prelaunch'),
         '@@FED_RESEARCH@@': render_fed_research(), '@@PLAYBOOKS@@': render_playbooks(),
         '@@RESEARCH_TOPICS@@': render_topics(exclude=('late-day', 'sector-fund-pulse')),
-        '@@SECTOR_FUNDS@@': render_topics(include=('sector-fund-pulse',)) or
-            '<p class="notice">板块资金尚未取得可展示的记录；后续同花顺资金研究会在这里更新。</p>',
         '@@NIGHT_RADAR@@': render_night_radar(),
         '@@HIGHMARK@@': render_highmark(),
         '@@ETF_MONITOR@@': render_etf_monitor(),

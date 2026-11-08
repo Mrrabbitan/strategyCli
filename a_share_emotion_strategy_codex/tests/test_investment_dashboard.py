@@ -18,17 +18,17 @@ class InvestmentDashboardTests(unittest.TestCase):
         self.env=patch.dict(os.environ,{'AUTOSTRATEGY_PRIVATE_ROOT':self.tmp.name});self.env.start();self.addCleanup(self.env.stop)
         self.y=patch('investment_dashboard.research_status',return_value={'as_of':None,'generated_at':None,'state':'测试空状态','missing':[],'link':None})
         self.y.start();self.addCleanup(self.y.stop)
-    def test_twelve_pages_and_independent_rules_without_accounts(self):
+    def test_eleven_pages_and_independent_rules_without_accounts(self):
         page=render_dashboard(dt.date(2026,9,11))
-        pages=('hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports','etf-monitor')
+        pages=('hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','highmark','strategy','reports','etf-monitor')
         tree=html.fromstring(page)
         self.assertEqual(tree.xpath('//nav[@aria-label="主要导航"]/*/@data-page'),list(pages))
-        self.assertEqual(len(tree.xpath('//*[contains(concat(" ",normalize-space(@class)," ")," page ")]')),12)
+        self.assertEqual(len(tree.xpath('//*[contains(concat(" ",normalize-space(@class)," ")," page ")]')),11)
         for name in pages:self.assertEqual(len(tree.xpath(f'//*[@id="page-{name}"]')),1)
         for name in ('prelaunch','yichujifa','dragon','late-day','three-step'):self.assertIn(f'id="strategy-{name}"',page)
         self.assertIn('href="#strategy-event-timing"',page)
         self.assertNotIn('id="page-event-timing"',page)
-        for old in ('page-plans','page-etf','holdings-rows','portfolio_snapshot','account_total_cny'):
+        for old in ('page-plans','page-etf','page-sector-funds','topic-sector-fund-pulse','holdings-rows','portfolio_snapshot','account_total_cny'):
             # Removed hashes may exist as compatibility redirects, not pages or payload.
             self.assertNotIn(f'id="{old}"',page)
         self.assertNotIn('@@',page);self.assertNotIn('"holdings":',page)

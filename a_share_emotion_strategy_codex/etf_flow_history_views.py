@@ -1,4 +1,4 @@
-"""Eastmoney historical sector-flow views, separate from ordinary THS references.
+"""Read-only Eastmoney historical sector-flow views.
 
 The supplied current catalogue is a frozen research universe, not a reconstruction
 of every historical date's industry universe. No collection or ranking occurs here.
@@ -180,7 +180,8 @@ def render(report=None, now=None):
             sources.append(f'<li>{_link(source.get("url"), source.get("label", "来源 ↗"))}'
                            f'<span>资料截至 {_e(source.get("as_of"))} · 取得 {_e(source.get("retrieved_at"))}</span>'
                            f'<p>{_e(source.get("basis"), "口径尚待补齐")}</p></li>')
-    gaps = [gap for gap in report.get('gaps', []) if isinstance(gap, str)][:8] if isinstance(report.get('gaps'), list) else []
+    gaps = [gap for gap in report.get('gaps', []) if isinstance(gap, str)
+            and not gap.startswith('本榜与同花顺普通资金净额')][:8] if isinstance(report.get('gaps'), list) else []
     gap_html = '<ul>' + ''.join(f'<li>{_e(gap)}</li>' for gap in gaps) + '</ul>' if gaps else ''
     count = _count(catalog.get('count'))
     coverage = report.get('coverage')
@@ -190,7 +191,7 @@ def render(report=None, now=None):
             '<header class="etfm-section-heading"><div><span class="etfm-kicker">EASTMONEY / HISTORICAL MAIN-FLOW MODEL</span>'
             '<h2>东财模型主力 · 20日历史榜</h2></div><span class="etfm-badge">历史回补 · 非实时</span></header>'
             '<p class="etfm-note">主力是供应商对大单 / 超大单的分类，不代表真实机构账户。'
-            '与下方同花顺普通资金净额分开，不直接比较两种口径或拼成买卖信号。</p>'
+            '历史资金排名用于研究板块变化，不单独构成买卖信号。</p>'
             f'<div class="etfm-summary"><article class="etfm-summary-focus"><span>冻结回溯窗口</span><strong>{_e(report.get("window_start"))} — {_e(report.get("window_end"))}</strong>'
             '<p>历史回补与重新计算，不倒填当时实时发布或当时已经知道的目录。</p></article>'
             f'<article><span>已核验日覆盖</span><strong>{len(complete_dates)} / 20</strong><p>缺日不当0，局部池不授正式榜。</p></article>'

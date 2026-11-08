@@ -375,7 +375,7 @@ def render(report=None, now=None):
             '<p>趋势、热度与海外对照，分开验证。</p></div>'
             f'<div class="etfm-heading-meta"><span class="etfm-status" data-etf-validity>{status}</span>'
             f'<p>A股 {cn_date.isoformat()} · 美股 {us_date.isoformat() if us_date else "待补"}</p></div></header>{stale}'
-            '<nav class="etfm-jumps" aria-label="ETF监控区域"><a href="#etf-em-history">主力历史</a><a href="#etfm-pressure">同花顺与阴线</a><a href="#etfm-cn">国内走势</a><a href="#etfm-intraday">盘中复核</a><a href="#etfm-turn">拐点观察</a>'
+            '<nav class="etfm-jumps" aria-label="ETF监控区域"><a href="#etf-em-history">主力历史</a><a href="#etfm-pressure">大阴线观察</a><a href="#etfm-cn">国内走势</a><a href="#etfm-intraday">盘中复核</a><a href="#etfm-turn">拐点观察</a>'
             '<a href="#etfm-heat">行业热度</a><a href="#etfm-us">美股对照</a><a href="#etfm-evidence">覆盖与方法</a></nav>'
             f'{flow_history}{pressure}'
             '<div class="etfm-summary"><article class="etfm-summary-focus"><span>原报告重点</span>'

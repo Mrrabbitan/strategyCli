@@ -218,7 +218,7 @@ def compute_report(catalog, identities, histories, dates, *, unit_verified, now=
     errors = list(gaps or [])
     errors += [SCOPE,
                '东财模型主力净额为源生大单与超大单净额之和，不能识别机构或游资真实交易主体。',
-               '本榜与同花顺普通资金净额是不同来源、分类与模型，独立显示，不混排或补缺。',
+               '历史资金排名用于研究板块变化，不单独构成买卖信号。',
                '正负分组各最多十项，净零单列；不足不补位，净额也不等于ETF申赎。']
     if not catalog.get('complete'):
         errors.append('本轮行业目录未通过完整性核验，未形成正式全池日榜。')
