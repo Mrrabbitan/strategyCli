@@ -3,7 +3,7 @@
   const $ = s => document.querySelector(s);
   let activePage = 'hot', busy = false, version = null, timer;
   function switchPage(next) {
-    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports'].includes(next)) next = 'reports';
+    if (!['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports','etf-monitor'].includes(next)) next = 'reports';
     activePage = next;
     document.querySelectorAll('.page').forEach(el => { el.hidden = el.id !== `page-${next}`; });
     document.querySelectorAll('[data-page]').forEach(el => {
@@ -25,6 +25,14 @@
     if (radarDay) selectRadarDay(radarDay.dataset.radarDay, radarList?.dataset.radarList);
     const nightDay = target.closest('[data-night-day]');
     if (nightDay) selectNightDay(nightDay.dataset.nightDay);
+    const etfRow = target.closest('[data-etf-row]');
+    if (etfRow?.hidden) {
+      const root = etfRow.closest('[data-etf-monitor]');
+      const search = root?.querySelector('[data-etf-search]'), filter = root?.querySelector('[data-etf-filter]');
+      if (search) search.value='';
+      if (filter) filter.value='all';
+      filterEtfs();
+    }
     if (target.tagName === 'DETAILS') target.open = true;
     requestAnimationFrame(() => target.scrollIntoView({block:'start'}));
     return parent.id.slice(5);
@@ -94,7 +102,7 @@
   }
   function saveReading() {
     const filters = [...document.querySelectorAll('[data-research-search]')].map(el => ({module:el.dataset.researchSearch, search:el.value, filter:document.querySelector(`[data-research-filter="${el.dataset.researchSearch}"]`)?.value || 'all'}));
-    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, filters, radar:radarReading(), night:document.querySelector('[data-night-radar]')?.dataset.nightSelectedDate, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
+    sessionStorage.setItem('investment-reading', JSON.stringify({page:activePage, scroll:window.scrollY, filters, etf:etfReading(), radar:radarReading(), night:document.querySelector('[data-night-radar]')?.dataset.nightSelectedDate, open:[...document.querySelectorAll('details[open][id]')].map(x=>x.id)}));
   }
   function selectNightDay(date) {
     const root = document.querySelector('[data-night-radar]'); if (!root) return;
@@ -139,8 +147,76 @@
   }
   document.querySelectorAll('[data-research-search]').forEach(el => el.addEventListener('input',()=>filterResearch(el.dataset.researchSearch)));
   document.querySelectorAll('[data-research-filter]').forEach(el => el.addEventListener('change',()=>filterResearch(el.dataset.researchFilter)));
+  function etfReading() {
+    const root = document.querySelector('[data-etf-monitor]'); if (!root) return null;
+    return {search:root.querySelector('[data-etf-search]')?.value || '',
+      filter:root.querySelector('[data-etf-filter]')?.value || 'all',
+      sort:root.querySelector('[data-etf-sort]')?.value || 'default'};
+  }
+  function filterEtfs() {
+    const root = document.querySelector('[data-etf-monitor]'); if (!root) return;
+    const query = (root.querySelector('[data-etf-search]')?.value || '').trim().toLowerCase();
+    const bucket = root.querySelector('[data-etf-filter]')?.value || 'all';
+    const sort = root.querySelector('[data-etf-sort]')?.value || 'default';
+    const rows = [...root.querySelectorAll('[data-etf-row]')];
+    const number = (row, key) => {
+      const value = row.dataset[key];
+      return value != null && value.trim() !== '' && Number.isFinite(Number(value)) ? Number(value) : null;
+    };
+    if (rows.length) {
+      const parent = rows[0].parentElement;
+      rows.sort((a,b) => {
+        if (sort === 'default') return Number(a.dataset.etfOrder) - Number(b.dataset.etfOrder);
+        const key = {pct5:'etfPct5',pct20:'etfPct20',vol20:'etfVol20'}[sort];
+        if (!key) return 0;
+        const av = number(a,key), bv = number(b,key);
+        if (av === null || bv === null) return av === bv ? 0 : av === null ? 1 : -1;
+        return (sort === 'vol20' ? av-bv : bv-av) || Number(a.dataset.etfOrder)-Number(b.dataset.etfOrder);
+      }).forEach(row => parent.appendChild(row));
+    }
+    let count = 0;
+    rows.forEach(row => {
+      const text = `${row.dataset.etfCode || ''} ${row.dataset.etfName || ''}`.toLowerCase();
+      row.hidden = !text.includes(query) || (bucket !== 'all' && row.dataset.etfBucket !== bucket);
+      if (!row.hidden) count++;
+    });
+    const label = root.querySelector('[data-etf-count]'), empty = root.querySelector('[data-etf-empty]');
+    if (label) label.textContent = `${count} / ${rows.length} 只匹配`;
+    if (empty) empty.hidden = count > 0;
+  }
+  function setupEtfs() {
+    const root = document.querySelector('[data-etf-monitor]'); if (!root) return;
+    root.querySelectorAll('[data-etf-row]').forEach((row,index) => {row.dataset.etfOrder=String(index);});
+    root.querySelector('[data-etf-search]')?.addEventListener('input',filterEtfs);
+    root.querySelector('[data-etf-filter]')?.addEventListener('change',filterEtfs);
+    root.querySelector('[data-etf-sort]')?.addEventListener('change',filterEtfs);
+    filterEtfs();
+  }
+  function restoreEtfs(saved) {
+    const root = document.querySelector('[data-etf-monitor]'); if (!root || !saved) return;
+    const search = root.querySelector('[data-etf-search]');
+    if (search && typeof saved.search === 'string') search.value = saved.search;
+    [['[data-etf-filter]',saved.filter],['[data-etf-sort]',saved.sort]].forEach(([selector,value]) => {
+      const select = root.querySelector(selector);
+      if (select && [...select.options].some(option=>option.value===value)) select.value=value;
+    });
+    filterEtfs();
+  }
   function expireResearch() {
     const now = Date.now();
+    document.querySelectorAll('[data-etf-quote-at]').forEach(row => {
+      const at = Date.parse(row.dataset.etfQuoteAt), label = row.querySelector('[data-etf-quote-status]');
+      if (label && (!Number.isFinite(at) || now-at > 90000 || at > now)) label.textContent='历史报价 · 时效不足，需重新取得行情';
+    });
+    document.querySelectorAll('[data-etf-asof]').forEach(root => {
+      const day = root.dataset.etfAsof;
+      const end = /^\d{4}-\d{2}-\d{2}$/.test(day || '') ? Date.parse(`${day}T00:00:00+08:00`) : NaN;
+      // A coarse age guard, not a verified trading calendar or live signal expiry.
+      if (Number.isFinite(end) && now >= end + 5*86400000) {
+        const label = root.querySelector('[data-etf-validity]');
+        if (label) label.textContent = '历史参考 · 数据超过4个自然日，需刷新；页面版本检查不会重新采集行情。';
+      }
+    });
     document.querySelectorAll('[data-late-day-until]').forEach(el => {
       const until = Date.parse(el.dataset.lateDayUntil);
       if (Number.isFinite(until) && now > until && !el.dataset.lateDayExpired) {
@@ -202,6 +278,7 @@
   document.addEventListener('visibilitychange',schedule);
   setupRadarTabs();
   setupNightTabs();
+  setupEtfs();
   const hashPage = locateHash();
   try {
     const stored = JSON.parse(sessionStorage.getItem('investment-reading') || 'null');
@@ -218,6 +295,7 @@
       });
       restoreRadarReading(stored.radar);
       selectNightDay(stored.night);
+      restoreEtfs(stored.etf);
       // A moved legacy anchor wins over the former page and scroll position.
       if (!hashPage || hashPage === stored.page) requestAnimationFrame(()=>window.scrollTo(0,stored.scroll));
     }

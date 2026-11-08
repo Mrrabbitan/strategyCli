@@ -9,7 +9,7 @@ const path = require('node:path');
 const http = require('node:http');
 const {chromium} = require(process.env.PLAYWRIGHT_MODULE || 'playwright');
 const js = fs.readFileSync(path.join(__dirname, '../templates/investment.js'), 'utf8');
-const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports'];
+const pages = ['hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports','etf-monitor'];
 const panel = `<div data-module="three-step" data-module-until="2099-01-01T15:00:00+08:00">
 <div class="research-status"><b>Research</b></div><p class="module-validity">Fictional fixture</p>
 <span class="qualified-count">1</span><input data-research-search="three-step">
@@ -29,8 +29,16 @@ const highmark = '<article id="topic-highmark-abnormal"><h2>Fictional highmark m
   '<details id="highmark-evidence"><summary>Highmark evidence</summary>'+
   '<div style="height:900px">Fictional calculation evidence only</div></details>'+
   '<div style="height:1500px">Fictional highmark reading restoration area</div></article>';
+const etfs = `<div data-etf-monitor data-etf-asof="2099-01-01"><b data-etf-validity>Fictional fixture</b>
+<label>Search<input data-etf-search></label><label>State<select data-etf-filter><option value="all">all</option><option value="trend">trend</option><option value="turn">turn</option><option value="repair">repair</option><option value="weak">weak</option></select></label>
+<label>Sort<select data-etf-sort><option value="default">default</option><option value="pct5">5 days</option><option value="pct20">20 days</option><option value="vol20">volatility</option></select></label>
+<span data-etf-count></span><p data-etf-empty hidden>No match</p><div data-etf-quote-at="2000-01-01T10:00:00+08:00"><span data-etf-quote-status>Artificial quote</span></div><table><tbody>
+<tr data-etf-row data-etf-code="000001" data-etf-name="fixture alpha" data-etf-bucket="trend" data-etf-pct5="1" data-etf-pct20="4" data-etf-vol20=""><td><details id="etfm-detail-000001"><summary>Alpha</summary>Fictional metrics</details></td></tr>
+<tr data-etf-row data-etf-code="000002" data-etf-name="fixture beta" data-etf-bucket="repair" data-etf-pct5="3" data-etf-pct20="-2" data-etf-vol20="20"><td><details id="etfm-detail-000002"><summary>Beta</summary>Fictional metrics</details></td></tr>
+<tr data-etf-row data-etf-code="000003" data-etf-name="fixture gamma" data-etf-bucket="trend" data-etf-pct5="2" data-etf-pct20="5" data-etf-vol20="10"><td>Gamma</td></tr>
+</tbody></table><div style="height:1800px">Fictional scroll area</div></div>`;
 const html = '<!doctype html><style>[hidden]{display:none!important}</style>'+pages.map(p=>`<button data-page="${p}">${p}</button>`).join('')+
-  pages.map(p=>`<section class="page" id="page-${p}" hidden>${p==='three-step'?panel:p==='strategy'?rules:p==='sector-funds'?funds:p==='highmark'?highmark:p}</section>`).join('')+
+  pages.map(p=>`<section class="page" id="page-${p}" hidden>${p==='three-step'?panel:p==='strategy'?rules:p==='sector-funds'?funds:p==='highmark'?highmark:p==='etf-monitor'?etfs:p}</section>`).join('')+
   '<div id="update-state"></div><script>'+js+'</script>';
 let revision = 'one';
 const server = http.createServer((req,res)=>{
@@ -62,7 +70,7 @@ const server = http.createServer((req,res)=>{
     });
     assert.equal(await page.locator('.qualified-count').textContent(),'0 条');
     assert.equal(await page.locator('[data-candidate][data-bucket="other"]').count(),2);
-    assert.equal(await page.locator('[data-page]').count(),11);
+    assert.equal(await page.locator('[data-page]').count(),12);
     await page.locator('[data-page="sector-radar"]').click();
     assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-sector-radar');
     await page.locator('[data-page="sector-funds"]').click();
@@ -126,7 +134,37 @@ const server = http.createServer((req,res)=>{
     assert.notEqual(await page.locator('#strategy-event-timing-rules').getAttribute('open'),null);
     await page.evaluate(()=>{location.hash='strategy-late-day';});
     assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-strategy');
+    await page.locator('[data-page="etf-monitor"]').click();
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-etf-monitor');
+    await page.locator('[data-etf-sort]').selectOption('vol20');
+    assert.deepEqual(await page.locator('[data-etf-row]').evaluateAll(rows=>rows.map(row=>row.dataset.etfCode)),['000003','000002','000001']);
+    await page.locator('[data-etf-sort]').selectOption('pct5');
+    assert.equal(await page.locator('[data-etf-row]').first().getAttribute('data-etf-code'),'000002');
+    await page.locator('[data-etf-search]').fill('beta');
+    await page.locator('[data-etf-filter]').selectOption('repair');
+    assert.equal(await page.locator('[data-etf-row]:not([hidden])').count(),1);
+    await page.locator('#etfm-detail-000002 summary').click();
+    await page.evaluate(()=>window.scrollTo(0,720));
+    revision='five';const etfReloaded=page.waitForEvent('load');
+    await page.evaluate(()=>document.dispatchEvent(new Event('visibilitychange')));await etfReloaded;
+    await page.waitForFunction(()=>Math.abs(window.scrollY-720)<10);
+    assert.equal(await page.locator('.page:not([hidden])').getAttribute('id'),'page-etf-monitor');
+    assert.equal(await page.locator('[data-etf-search]').inputValue(),'beta');
+    assert.equal(await page.locator('[data-etf-filter]').inputValue(),'repair');
+    assert.equal(await page.locator('[data-etf-sort]').inputValue(),'pct5');
+    assert.notEqual(await page.locator('#etfm-detail-000002').getAttribute('open'),null);
+    await page.locator('[data-etf-search]').fill('no-such-fixture');
+    assert.equal(await page.locator('[data-etf-empty]').isVisible(),true);
+    await page.evaluate(()=>{location.hash='etfm-detail-000001';});
+    await page.waitForFunction(()=>!document.querySelector('[data-etf-code="000001"]').hidden);
+    assert.notEqual(await page.locator('#etfm-detail-000001').getAttribute('open'),null);
+    await page.evaluate(()=>{
+      document.querySelector('[data-etf-monitor]').dataset.etfAsof='2000-01-01';
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    assert.match(await page.locator('[data-etf-validity]').textContent(),/历史参考/);
+    assert.match(await page.locator('[data-etf-quote-status]').textContent(),/时效不足/);
     assert.deepEqual(errors,[]);
-    console.log('Offline browser: eleven tabs, moved highmark legacy anchor overrides stale reports reading, both legacy anchors and detail/scroll restoration, rule anchors, filtering and expiry passed.');
+    console.log('Offline browser: twelve tabs, legacy anchors, detail/scroll restoration, ETF search/sort/state restoration and expiry passed.');
   } finally {if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -275,8 +275,9 @@ class TopicTests(unittest.TestCase):
         data['related_module'] = 'prelaunch'
         publish_topic(data, now=self.now)
         page = render_dashboard(self.now.date())
-        self.assertEqual(re.findall(r'data-page="([a-z]+)"', page),
-                         ['hot', 'dragon', 'yichujifa', 'prelaunch', 'strategy', 'reports'])
+        self.assertEqual(re.findall(r'data-page="([a-z-]+)"', page),
+                         ['hot', 'dragon', 'yichujifa', 'prelaunch', 'late-day', 'three-step', 'sector-radar',
+                          'sector-funds', 'highmark', 'strategy', 'reports', 'etf-monitor'])
         self.assertNotIn('@@', page)
         for module in data['related_modules']:
             surface = page.split(f'<section id="page-{module}"', 1)[1].split('<section id="page-', 1)[0]

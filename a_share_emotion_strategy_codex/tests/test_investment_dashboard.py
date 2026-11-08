@@ -18,12 +18,12 @@ class InvestmentDashboardTests(unittest.TestCase):
         self.env=patch.dict(os.environ,{'AUTOSTRATEGY_PRIVATE_ROOT':self.tmp.name});self.env.start();self.addCleanup(self.env.stop)
         self.y=patch('investment_dashboard.research_status',return_value={'as_of':None,'generated_at':None,'state':'测试空状态','missing':[],'link':None})
         self.y.start();self.addCleanup(self.y.stop)
-    def test_eleven_pages_and_independent_rules_without_accounts(self):
+    def test_twelve_pages_and_independent_rules_without_accounts(self):
         page=render_dashboard(dt.date(2026,9,11))
-        pages=('hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports')
+        pages=('hot','dragon','yichujifa','prelaunch','late-day','three-step','sector-radar','sector-funds','highmark','strategy','reports','etf-monitor')
         tree=html.fromstring(page)
         self.assertEqual(tree.xpath('//nav[@aria-label="主要导航"]/*/@data-page'),list(pages))
-        self.assertEqual(len(tree.xpath('//*[contains(concat(" ",normalize-space(@class)," ")," page ")]')),11)
+        self.assertEqual(len(tree.xpath('//*[contains(concat(" ",normalize-space(@class)," ")," page ")]')),12)
         for name in pages:self.assertEqual(len(tree.xpath(f'//*[@id="page-{name}"]')),1)
         for name in ('prelaunch','yichujifa','dragon','late-day','three-step'):self.assertIn(f'id="strategy-{name}"',page)
         self.assertIn('href="#strategy-event-timing"',page)
@@ -33,6 +33,14 @@ class InvestmentDashboardTests(unittest.TestCase):
             self.assertNotIn(f'id="{old}"',page)
         self.assertNotIn('@@',page);self.assertNotIn('"holdings":',page)
         self.assertIn('第二次',page);self.assertIn('9:50',page);self.assertIn('RR',page)
+    def test_etf_monitor_is_dedicated_and_preserves_reports_scope(self):
+        fixture='<article data-etf-monitor><h1>人工ETF研究</h1><details id="etfm-detail-000001"><summary>指标依据</summary>人工数据</details></article>'
+        with patch('etf_monitor_views.render',return_value=fixture):
+            tree=html.fromstring(render_dashboard(dt.date(2026,9,11)))
+        self.assertEqual(len(tree.xpath('//*[@id="page-etf-monitor"]//*[@data-etf-monitor]')),1)
+        self.assertFalse(tree.xpath('//*[@id="page-reports"]//*[@data-etf-monitor]'))
+        self.assertFalse(tree.xpath('//iframe'))
+        self.assertFalse(tree.xpath('//*[@id="page-etf"]'))
     def test_highmark_content_and_legacy_anchor_only_live_in_dedicated_page(self):
         fictional='<article id="topic-highmark-abnormal"><h2>人工高标样例</h2><details id="highmark-evidence"><summary>人工计算证据</summary>仅用于离线验证</details></article>'
         with patch('highmark_views.render',return_value=fictional),patch('night_radar_views.render_page',return_value='<article id="fixture-night-radar">人工晚间报告</article>'):

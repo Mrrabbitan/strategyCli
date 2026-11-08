@@ -78,6 +78,7 @@ dates[0].handlers.keydown(key('Enter'));assert.equal(prevented,4);
 
     def test_reading_state_restores_dates_lists_scroll_filters_and_details(self):
         save = section('  function saveReading()', '  function filterResearch(module)')
+        save += section('  function etfReading()', '  function filterEtfs()')
         self.run_js(HARNESS + self.tab_code() + save + r'''
 setupRadarTabs();selectRadarDay('2026-02-04','started');selectRadarDay('2026-02-03','observed');
 saveReading();
